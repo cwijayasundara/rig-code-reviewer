@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — a running review was invisible**
+- `/review-run` buffered each stage process (`spawnSync` + `--output-format json`), so nothing appeared until a stage ended, and the model ran it in the background with no follow-up. Stages now run with `--output-format stream-json --verbose`; every tool call and agent start streams to the terminal and to `<analysis>/run.log` (timestamped, `tail -f`-able) as it happens, and the run's live state goes to `<analysis>/progress.json`.
+- The status Mod drew only into the Spinner, which is not shown once a turn ends, and refreshed only on turn boundaries. It now polls every 2 s, pins a status line under the prompt (stage n/10 · elapsed · tool calls · agents · last activity · findings · cost), and opens a "Code review" pane (stages, per-stage cost, findings, run.log tail) automatically when a run starts, or on `/review-dashboard`. A run with no driver event for 20 min is flagged, not shown as healthy.
+- New `review.ts watch <name>`: follows run.log, prints stage-level lines only, exits when the run ends (3 if the driver died). The `review-run` skill arms it as a Monitor and relays each stage in chat.
+
 ## 2.0.0
 Rewritten in zero-dependency TypeScript (Node ≥ 22.18) behind one CLI, `scripts/review.ts`. Python removed.
 

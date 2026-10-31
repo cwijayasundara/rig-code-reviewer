@@ -34,6 +34,30 @@ test("driver runs every stage, retries a lost shard, renders reconciled reports,
   const status = JSON.parse(readFileSync(join(a, "status.json"), "utf8"));
   assert.equal(status.complete, true);
   assert.ok(status.usage.totals.total_cost_usd > 0);
+  // live visibility: stage activity streamed to the terminal, run.log and progress.json
+  assert.match(r.out, /live log: +tail -f .*run\.log/);
+  assert.match(r.out, /· Read src\/app\.py/);
+  assert.match(r.out, /↳ agent security-auditor: stub deep shard/);
+  const runLog = readFileSync(join(a, "run.log"), "utf8");
+  assert.match(runLog, /^\d\d:\d\d:\d\d ==> preflight: fresh process/m);
+  assert.match(runLog, /· Read src\/app\.py/);
+  assert.match(runLog, /=== review-run e2e done ===/);
+  const progress = JSON.parse(readFileSync(join(a, "progress.json"), "utf8"));
+  assert.equal(progress.state, "done");
+  assert.equal(progress.stage, "report");
+  assert.ok(progress.agents_started >= 1 && progress.tool_calls >= 1);
+  // `watch` relays stage lines only and exits once the run is over
+  const w = cli(["watch", "e2e", "--source", src]);
+  assert.equal(w.code, 0, w.err);
+  assert.match(w.out, /==> verify: fresh process/);
+  assert.match(w.out, /=== review-run e2e done ===/);
+  assert.doesNotMatch(w.out, /· Read/);
+  // a killed driver is reported, not watched forever
+  writeFileSync(join(a, "progress.json"), JSON.stringify({ ...progress, state: "running", pid: 2 ** 22 + 12345 }));
+  const dead = cli(["watch", "e2e", "--source", src]);
+  assert.equal(dead.code, 3);
+  assert.match(dead.out, /driver pid \d+ is gone/);
+  writeFileSync(join(a, "progress.json"), JSON.stringify(progress));
   assert.equal(existsSync(join(src, ".code-review", "active.json")), false, "guard deactivated after the run");
   assert.equal(readFileSync(join(src, ".code-review", ".gitignore"), "utf8"), "*\n");
   // the source tree is untouched apart from the ignored review dir
@@ -62,6 +86,8 @@ test("budget: the driver stops before a stage once --max-usd is spent", () => {
   const r = cli(["run", "b", "--source", src, "--runner", STUB, "--offline", "--max-usd", "0.02"]);
   assert.equal(r.code, 4, r.out + r.err);
   assert.match(r.err, /budget \$0.02 reached/);
+  const progress = JSON.parse(readFileSync(join(src, ".code-review", "b", "progress.json"), "utf8"));
+  assert.equal(progress.state, "stopped", "the dashboard sees the budget stop");
 });
 
 test("dry run prints the stage plan and spends nothing", () => {

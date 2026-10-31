@@ -61,4 +61,8 @@ switch (stage) {
   }
   default: process.stderr.write(`stub: unknown stage in ${prompt}\n`); process.exit(2);
 }
-console.log(JSON.stringify({ result: `stub ${stage} ok`, usage: { input_tokens: 1000, output_tokens: 100 }, total_cost_usd: 0.01, duration_ms: 5 }));
+// Shaped like `--output-format stream-json --verbose`: activity events, then the result.
+console.log(JSON.stringify({ type: "system", subtype: "init" }));
+console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "src/app.py" } }] } }));
+console.log(JSON.stringify({ type: "assistant", parent_tool_use_id: "t1", message: { content: [{ type: "tool_use", name: "Agent", input: { subagent_type: "security-auditor", description: `stub ${stage} shard` } }] } }));
+console.log(JSON.stringify({ type: "result", result: `stub ${stage} ok`, usage: { input_tokens: 1000, output_tokens: 100 }, total_cost_usd: 0.01, duration_ms: 5 }));

@@ -1,6 +1,6 @@
 {
-  "description": "code-review-harness guardrails + status Mod. Strict only while a review is active (CODE_REVIEW_ACTIVE=1 from /review-run, or <cwd>/.code-review/active.json from a manual stage): Edit/Write only inside the review dir and never on script-owned files; a Bash seatbelt against mutating git, installs, in-place edits and writes into the source tree; agent outputs (raw shards, votes, topology, architecture) validated on write. Outside a review the hooks do nothing. The Mod (register.ts) renders status.json in the spinner and via /review-dashboard. No telemetry.",
-  "modules": ["./register.ts"],
+  "description": "code-review-harness guardrails + status Mod. Strict only while a review is active (CODE_REVIEW_ACTIVE=1 from /review-run, or <cwd>/.code-review/active.json from a manual stage): Edit/Write only inside the review dir and never on script-owned files; a Bash seatbelt against mutating git, installs, in-place edits and writes into the source tree; agent outputs (raw shards, votes, topology, architecture) validated on write. Outside a review the hooks do nothing. The Mod (register.tsx) polls status.json + progress.json every 2 s: a status line under the prompt, a live pane (auto-opened when a run starts, or /review-dashboard) and the spinner suffix. No telemetry.",
+  "modules": ["./register.tsx"],
   "hooks": {
     "PreToolUse": [
       { "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "node --disable-warning=ExperimentalWarning \"${CLAUDE_PLUGIN_ROOT}/scripts/review.ts\" hook guard-edit", "timeout": 10 }] },

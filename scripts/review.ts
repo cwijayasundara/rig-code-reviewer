@@ -19,6 +19,7 @@ import { runScanners } from "./lib/scanners.ts";
 import { writeStatus } from "./lib/status.ts";
 import { suggestModules } from "./lib/modules.ts";
 import { runDriver } from "./lib/run.ts";
+import { watchRun } from "./lib/progress.ts";
 import { validateArchitecture, validateTopology } from "./lib/architecture.ts";
 import { DIMENSIONS, SHARDED, type Dimension, type Scope, type ShardedStage } from "./lib/types.ts";
 import { nowIso, parseArgs, readJson, str, writeJson, writeText } from "./lib/util.ts";
@@ -269,6 +270,13 @@ export const COMMANDS: Record<string, Cmd> = {
         if (which !== "validate-write" && (process.env.CODE_REVIEW_ACTIVE === "1")) printDecision({ deny: `guard error: ${(e as Error).message}` }, "PreToolUse");
       }
       return 0;
+    },
+  },
+  watch: {
+    usage: "watch <name> [--source path] [--out dir] [--max-minutes N]   (follow a running review-run: stage lines only; exits when it ends)",
+    run: (pos, flags) => {
+      const { analysis } = resolvePaths(pos[0] ?? "", str(flags.source) ?? ".", process.cwd(), str(flags.out));
+      return watchRun(analysis, str(flags["max-minutes"]) ? Number(flags["max-minutes"]) : undefined);
     },
   },
   run: {

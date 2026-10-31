@@ -36,6 +36,8 @@ The harness is loaded per project: a review only needs the plugin in the session
 
 **Budget:** each stage process carries ~$0.25–0.35 of fixed overhead, then agents scale with modules × dimensions and with findings (security findings cost three verifier votes each). Live runs measured ~$4–6 for a 20-line seeded repository with all eight dimensions; set `--max-usd` and read the per-stage estimate the driver prints before each sharded stage (estimates self-calibrate from `usage.json`). When the cap is reached mid-stage, unfinished panels become needs-human — never silently confirmed.
 
+**Watching a run:** the driver prints `live log: tail -f <analysis>/run.log`. That log carries every tool call and agent start of every stage as it happens (type `! tail -f …` to stream it into the session). A status line under the prompt shows stage · elapsed · tool calls · agents · cost for the whole run. The "Code review" pane opens by itself when a run starts (on terminals 144 columns or wider), or any time with `/review-dashboard`. In chat, the skill relays each stage start and finish through `review.ts watch <name>`.
+
 One fresh headless Claude process per stage (context isolation by construction), with deterministic steps run by the driver in between. Re-run the same command to resume. Step by step instead: `/code-review-harness:review <name> --source <path>` then follow the printed next command (type `/clear` between stages). `/code-review-harness:review-status <name>` works any time, in any session.
 
 | Stage | What happens | Owner |

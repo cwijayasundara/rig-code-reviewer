@@ -78,7 +78,7 @@ test("hooks.json: every hook command is a real CLI hook mode", () => {
   const cmds = Object.values(h.hooks).flat().flatMap((e: any) => e.hooks.map((x: any) => x.command as string));
   assert.ok(cmds.length >= 3);
   for (const c of cmds) assert.match(c, /scripts\/review\.ts\\?" hook (guard-edit|guard-bash|validate-write)$/);
-  assert.deepEqual(h.modules, ["./register.ts"]);
+  assert.deepEqual(h.modules, ["./register.tsx"]);
 });
 
 test("no Python left behind; no versioned model ids anywhere in plugin text", () => {
