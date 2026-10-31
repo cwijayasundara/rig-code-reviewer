@@ -1,0 +1,12 @@
+{
+  "id": "gitleaks",
+  "tool": "gitleaks",
+  "binary": "gitleaks",
+  "versionArgs": ["version"],
+  "command": ["dir", "{src}", "--report-format", "json", "--report-path", "-", "--redact", "--no-banner", "--exit-code", "0", "--log-level", "error"],
+  "network": false,
+  "adapter": "gitleaks",
+  "dimension": "security",
+  "cwe": "CWE-798",
+  "okExitCodes": [0]
+}

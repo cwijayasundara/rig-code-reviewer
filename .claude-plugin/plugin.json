@@ -1,0 +1,20 @@
+{
+  "name": "code-review-harness",
+  "version": "2.0.0",
+  "description": "Read-only, whole-codebase architecture + code + security evaluation of an existing repository. Deterministic evidence (SLOC, complexity, churn x complexity hotspots, ownership, semgrep/gitleaks/osv-scanner packs), specialist agents per module x dimension, per-component threat model + category sweep, adversarial verification (three-lens 2-of-3 panel computed in code), stable fingerprinted findings, honest coverage accounting, ISO 25010 architecture scorecard, and deterministic ANALYSIS_REPORT.md / ARCHITECTURE.md / ROADMAP.md / REPORT.html / SARIF. One fresh process per stage, resumable, budget-capped. Never modifies the code under review.",
+  "author": {
+    "name": "Chaminda Wijayasundara"
+  },
+  "homepage": "https://github.com/cwijayasundara/rig-code-reviewer",
+  "repository": "https://github.com/cwijayasundara/rig-code-reviewer",
+  "license": "Apache-2.0",
+  "keywords": [
+    "code-review",
+    "architecture-review",
+    "security-audit",
+    "threat-model",
+    "sarif",
+    "static-analysis",
+    "codebase-assessment"
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "code-review-harness/architecture.schema.json",
+  "title": "Architecture assessment",
+  "description": "Written by the architecture stage. Validated by scripts/lib/architecture.ts validateArchitecture(): a numeric rating, decision or disposition without file:line evidence is rejected; use \"unavailable\" when evidence is insufficient.",
+  "type": "object",
+  "required": ["summary", "style"],
+  "$defs": {
+    "cite": { "type": "string", "pattern": "\\S+:\\d+" },
+    "evidence": { "type": "array", "items": { "type": "string" }, "contains": { "$ref": "#/$defs/cite" } }
+  },
+  "properties": {
+    "summary": { "type": "string", "minLength": 1 },
+    "style": { "type": "string", "minLength": 1 },
+    "quality_attributes": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["name", "rating"],
+        "properties": {
+          "name": { "enum": ["functional_suitability", "performance_efficiency", "compatibility", "usability", "reliability", "security", "maintainability", "portability"] },
+          "rating": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 5 }, { "const": "unavailable" }] },
+          "rationale": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        },
+        "if": { "properties": { "rating": { "type": "integer" } } },
+        "then": { "required": ["evidence"], "properties": { "evidence": { "$ref": "#/$defs/evidence" } } }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": { "type": "object", "required": ["title", "decision", "evidence"],
+        "properties": { "title": { "type": "string" }, "context": { "type": "string" }, "decision": { "type": "string" },
+          "consequences": { "type": "string" }, "evidence": { "$ref": "#/$defs/evidence" } } }
+    },
+    "dispositions": {
+      "type": "array",
+      "items": { "type": "object", "required": ["module", "disposition", "evidence"],
+        "properties": { "module": { "type": "string" },
+          "disposition": { "enum": ["retain", "refactor", "rearchitect", "rebuild", "replace", "retire"] },
+          "rationale": { "type": "string" }, "evidence": { "$ref": "#/$defs/evidence" } } }
+    },
+    "risks": {
+      "type": "array",
+      "items": { "type": "object", "required": ["title"],
+        "properties": { "title": { "type": "string" }, "evidence": { "type": "array", "items": { "type": "string" } },
+          "finding_ids": { "type": "array", "items": { "type": "string" } } } }
+    },
+    "one_thing": { "type": "string" }
+  }
+}

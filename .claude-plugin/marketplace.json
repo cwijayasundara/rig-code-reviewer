@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "rig-code-reviewer",
+  "description": "Read-only code, architecture and security evaluation harness for existing repositories.",
+  "owner": {
+    "name": "Chaminda Wijayasundara"
+  },
+  "plugins": [
+    {
+      "name": "code-review-harness",
+      "source": "./",
+      "description": "Read-only whole-codebase architecture + code + security evaluation with adversarial verification and deterministic reports.",
+      "version": "2.0.0"
+    }
+  ]
+}

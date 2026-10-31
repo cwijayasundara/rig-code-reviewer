@@ -1,0 +1,9 @@
+{
+  "description": "Express path traversal in /download with a guarded twin (bait).",
+  "must": [
+    { "id": "traversal", "file": "src/server.js", "regex": "path ?travers|directory travers|CWE-22|CWE-23|arbitrary file", "dimension": "security" }
+  ],
+  "mustNot": [
+    { "id": "safe-twin-flagged", "file": "src/server.js", "lineRange": [13, 18], "minSeverity": "Medium" }
+  ]
+}

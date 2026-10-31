@@ -1,0 +1,15 @@
+{
+  "id": "npm-audit",
+  "tool": "npm audit",
+  "binary": "npm",
+  "versionArgs": ["--version"],
+  "appliesWhen": { "anyFile": ["package-lock.json"] },
+  "command": ["audit", "--json", "--prefix", "{src}"],
+  "network": true,
+  "adapter": "npm-audit",
+  "dimension": "dependencies",
+  "cwe": "CWE-1395",
+  "okExitCodes": [0, 1],
+  "enabledByDefault": false,
+  "note": "covered by osv-scanner; enable explicitly to cross-check npm advisories"
+}

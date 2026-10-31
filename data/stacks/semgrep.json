@@ -1,0 +1,12 @@
+{
+  "id": "semgrep",
+  "tool": "semgrep",
+  "binary": "semgrep",
+  "versionArgs": ["--version"],
+  "command": ["scan", "--config", "p/default", "--json", "--metrics=off", "--disable-version-check", "--quiet", "{src}"],
+  "network": true,
+  "adapter": "semgrep",
+  "dimension": "security",
+  "okExitCodes": [0, 1],
+  "note": "p/default ruleset is fetched from the semgrep registry; point --config at a local ruleset for offline runs"
+}

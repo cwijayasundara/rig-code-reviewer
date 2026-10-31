@@ -1,0 +1,7 @@
+{
+  "description": "Clean control: well-written module with tests. Any confirmed High+ finding is a false positive.",
+  "must": [],
+  "mustNot": [
+    { "id": "any-high", "file": "*", "minSeverity": "High" }
+  ]
+}

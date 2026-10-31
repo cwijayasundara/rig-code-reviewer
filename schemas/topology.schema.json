@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "code-review-harness/topology.schema.json",
+  "title": "Topology",
+  "description": "Written by the map stage. Validated by scripts/lib/architecture.ts validateTopology(); every edge, store, external and flow must cite file:line.",
+  "type": "object",
+  "required": ["modules"],
+  "$defs": { "cite": { "type": "string", "pattern": "\\S+:\\d+" } },
+  "properties": {
+    "modules": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["name", "path"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 },
+          "lines": { "type": "number", "minimum": 0 }, "kind": { "type": "string" }, "description": { "type": "string" }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["from", "to", "type", "evidence"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1 }, "to": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["call", "dispatch", "read", "write", "import", "http", "event"] },
+          "evidence": { "$ref": "#/$defs/cite" }
+        }
+      }
+    },
+    "entry_points": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name", "file", "line"],
+        "properties": { "name": { "type": "string" }, "kind": { "type": "string" }, "file": { "type": "string" }, "line": { "type": "integer", "minimum": 1 } } }
+    },
+    "data_stores": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name", "evidence"],
+        "properties": { "name": { "type": "string" }, "kind": { "type": "string" }, "evidence": { "$ref": "#/$defs/cite" } } }
+    },
+    "externals": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name", "evidence"],
+        "properties": { "name": { "type": "string" }, "kind": { "type": "string" }, "evidence": { "$ref": "#/$defs/cite" } } }
+    },
+    "flows": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name", "steps", "evidence"],
+        "properties": { "name": { "type": "string" }, "steps": { "type": "array", "items": { "type": "string" } },
+          "evidence": { "type": "array", "contains": { "$ref": "#/$defs/cite" } } } }
+    },
+    "dead_ends": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name"],
+        "properties": { "name": { "type": "string" }, "reason": { "type": "string" }, "evidence": { "type": "string" } } }
+    },
+    "observations": { "type": "array", "items": { "type": "string" } }
+  }
+}

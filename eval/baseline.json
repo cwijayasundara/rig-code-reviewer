@@ -1,0 +1,9 @@
+{
+  "note": "Gate thresholds per case. A case with no entry is reported as 'not enforced', never silently passed. Tighten, never loosen without a recorded reason.",
+  "cases": {
+    "py-sqli": {
+      "minRecall": 1, "maxFalsePositives": 0, "maxDuplicatesOfMust": 0, "maxColocated": 7, "maxUsd": 9,
+      "source": "live runs 2026-10-31: before consolidation recall 1, FP 0, 14 confirmed, co-located 12, $6.67; with consolidation recall 1, FP 0, 10 confirmed, co-located 7, $6.08"
+    }
+  }
+}

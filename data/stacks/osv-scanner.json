@@ -1,0 +1,14 @@
+{
+  "id": "osv-scanner",
+  "tool": "osv-scanner",
+  "binary": "osv-scanner",
+  "versionArgs": ["--version"],
+  "command": ["scan", "source", "-r", "--format", "json", "{src}"],
+  "network": true,
+  "adapter": "osv",
+  "dimension": "dependencies",
+  "cwe": "CWE-1395",
+  "okExitCodes": [0, 1],
+  "notApplicableExitCodes": [128],
+  "note": "queries osv.dev for known vulnerabilities in lockfiles/manifests"
+}

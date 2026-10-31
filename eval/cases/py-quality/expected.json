@@ -1,0 +1,11 @@
+{
+  "description": "N+1 query loop and a swallowed exception on an outbound call without timeout.",
+  "must": [
+    { "id": "n-plus-one", "file": "src/orders.py", "regex": "N\\+1|per.?(item|customer)|loop|batch" },
+    { "id": "swallowed", "file": "src/orders.py", "regex": "swallow|except|silent|ignored" }
+  ],
+  "should": [
+    { "id": "no-timeout", "file": "src/orders.py", "regex": "timeout" }
+  ],
+  "mustNot": []
+}

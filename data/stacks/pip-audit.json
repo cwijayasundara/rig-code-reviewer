@@ -1,0 +1,15 @@
+{
+  "id": "pip-audit",
+  "tool": "pip-audit",
+  "binary": "pip-audit",
+  "versionArgs": ["--version"],
+  "appliesWhen": { "anyFile": ["requirements.txt"] },
+  "command": ["-r", "{src}/requirements.txt", "--no-deps", "--disable-pip", "-f", "json", "--progress-spinner", "off"],
+  "network": true,
+  "adapter": "pip-audit",
+  "dimension": "dependencies",
+  "cwe": "CWE-1395",
+  "okExitCodes": [0, 1],
+  "enabledByDefault": false,
+  "note": "covered by osv-scanner; --no-deps --disable-pip so nothing from the target is installed or executed"
+}

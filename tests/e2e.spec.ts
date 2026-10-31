@@ -1,0 +1,77 @@
+// $0 scripted end-to-end: the real driver, plans, merge, panel, render and
+// gates, with a stub runner standing in for `claude -p`.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { APP, ROOT, cli, git, tree } from "./testkit.ts";
+
+const STUB = `${process.execPath} --disable-warning=ExperimentalWarning ${join(ROOT, "tests", "fixtures", "stub-claude.ts")}`;
+
+function repo() {
+  const src = tree({ "src/app.py": APP, "README.md": "# demo\n" });
+  git(src, "init", "-q"); git(src, "add", "."); git(src, "commit", "-qm", "init");
+  return src;
+}
+
+test("driver runs every stage, retries a lost shard, renders reconciled reports, then resumes as a no-op", () => {
+  const src = repo();
+  const r = cli(["run", "e2e", "--source", src, "--runner", STUB, "--offline", "--dimensions", "security,quality", "--max-agents", "10"], { env: { STUB_LOSE_ONCE: "1" } });
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.match(r.out, /lost; retrying once/);
+  const a = join(src, ".code-review", "e2e");
+  for (const f of ["ANALYSIS_REPORT.md", "ARCHITECTURE.md", "ROADMAP.md", "REPORT.html", "findings.sarif", "findings.jsonl", "REVISION.json", "THREAT_MODEL.md", "coverage.json"]) {
+    assert.ok(existsSync(join(a, f)), `missing ${f}`);
+  }
+  const findings = JSON.parse(readFileSync(join(a, "findings.json"), "utf8")).findings as { dimension: string; verdict: string; reporters: number; severity: string }[];
+  const sec = findings.filter((f) => f.dimension === "security");
+  assert.equal(sec.length, 1, "SQLi reported by the injection shard is one finding");
+  assert.equal(sec[0]!.verdict, "confirmed");
+  assert.ok(findings.every((f) => f.verdict), "every finding has a verdict");
+  const sarif = JSON.parse(readFileSync(join(a, "findings.sarif"), "utf8"));
+  assert.equal(sarif.runs[0].results.length, findings.filter((f) => f.verdict === "confirmed").length);
+  assert.ok(sarif.runs[0].results.every((x: { partialFingerprints: Record<string, string> }) => x.partialFingerprints["codeReviewHarness/v1"]));
+  const status = JSON.parse(readFileSync(join(a, "status.json"), "utf8"));
+  assert.equal(status.complete, true);
+  assert.ok(status.usage.totals.total_cost_usd > 0);
+  assert.equal(existsSync(join(src, ".code-review", "active.json")), false, "guard deactivated after the run");
+  assert.equal(readFileSync(join(src, ".code-review", ".gitignore"), "utf8"), "*\n");
+  // the source tree is untouched apart from the ignored review dir
+  const st = spawnGit(src, ["status", "--porcelain"]);
+  assert.equal(st.trim(), "", `source changed: ${st}`);
+  // resume: everything skipped
+  const again = cli(["run", "e2e", "--source", src, "--runner", STUB, "--offline"]);
+  assert.equal(again.code, 0, again.err);
+  assert.equal((again.out.match(/gate passes, skipping/g) ?? []).length, 9);
+});
+
+test("render refuses when the source changed since assess, and --allow-stale banners it", () => {
+  const src = repo();
+  assert.equal(cli(["run", "st", "--source", src, "--runner", STUB, "--offline", "--dimensions", "quality"]).code, 0);
+  writeFileSync(join(src, "src", "app.py"), APP + "# edited\n");
+  const r = cli(["render", "st"], { cwd: src });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /changed since assess/);
+  const ok = cli(["render", "st", "--allow-stale"], { cwd: src });
+  assert.equal(ok.code, 0, ok.err);
+  assert.match(readFileSync(join(src, ".code-review", "st", "ANALYSIS_REPORT.md"), "utf8"), /stale|STALE/);
+});
+
+test("budget: the driver stops before a stage once --max-usd is spent", () => {
+  const src = repo();
+  const r = cli(["run", "b", "--source", src, "--runner", STUB, "--offline", "--max-usd", "0.02"]);
+  assert.equal(r.code, 4, r.out + r.err);
+  assert.match(r.err, /budget \$0.02 reached/);
+});
+
+test("dry run prints the stage plan and spends nothing", () => {
+  const src = repo();
+  const r = cli(["run", "d", "--source", src, "--dry-run"]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal((r.out.match(/\[dry-run\]/g) ?? []).length, 9);
+});
+
+import { spawnSync } from "node:child_process";
+function spawnGit(dir: string, args: string[]): string {
+  return spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" }).stdout;
+}

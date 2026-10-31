@@ -1,0 +1,19 @@
+{
+  "name": "code-review-harness",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test tests/*.spec.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "validate": "claude plugin validate .",
+    "check": "npm run typecheck && npm test",
+    "eval": "node --disable-warning=ExperimentalWarning eval/run.ts",
+    "eval:dry": "node --disable-warning=ExperimentalWarning eval/run.ts --dry"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
