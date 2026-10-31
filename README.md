@@ -4,12 +4,29 @@ A Claude Code plugin for a **read-only, whole-codebase evaluation** of an existi
 
 It builds on the staged assess → map → review flow of Anthropic's Apache-2.0 [code-modernization](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-modernization) plugin (see [NOTICE.md](NOTICE.md)), adds an independently written threat-model → sweep → three-angle verification pipeline for security, and follows the engineering conventions of the `rig` SDLC harness: **models advise, scripts decide**.
 
-```text
-/plugin marketplace add cwijayasundara/rig-code-reviewer
-/plugin install code-review-harness@rig-code-reviewer
-```
+## Install
 
-Requirements: Claude Code ≥ 2.1.287, Node ≥ 22.18 (no npm install needed at runtime; zero dependencies). Optional scanners: `gitleaks`, `osv-scanner`, `semgrep`.
+The harness is loaded per project: a review only needs the plugin in the session that runs it, and nothing is installed globally. Artefacts stay in the reviewed repo's git-ignored `.code-review/` folder, so the reviewed code never depends on the plugin.
+
+**Requirements:** Node 22.18 or later, `git`, Claude Code 2.1.287 or later. Optional scanners: `gitleaks`, `osv-scanner`, `semgrep` (a missing or broken one is reported as a coverage gap, never as clean).
+
+1. **Load the plugin for one review session.** Start Claude Code from the root of the repo you want reviewed:
+
+   ```bash
+   cd /path/to/repo-under-review
+   claude --plugin-dir /abs/path/to/rig-code-reviewer
+   ```
+
+   That session is all a review needs; `/code-review-harness:review-run` spawns its stage processes with the same plugin directory.
+2. **Or keep it on for a repo you review regularly** — install at project scope:
+
+   ```bash
+   claude plugin marketplace add cwijayasundara/rig-code-reviewer --scope project
+   claude plugin install code-review-harness@rig-code-reviewer --scope project
+   ```
+
+   Never run either command without `--scope project`: their default is user scope, which loads the plugin (about 2k tokens of skill descriptions) into every session in every repo. For a local checkout, pass its path instead of `cwijayasundara/rig-code-reviewer`.
+3. **Upgrade** by pulling the plugin repo (`--plugin-dir` sessions pick it up immediately), or for a project-scope install run `claude plugin marketplace update rig-code-reviewer` and update the plugin from `/plugin`.
 
 ## Use
 
