@@ -2,7 +2,7 @@
 // code-review-harness CLI. Models advise, scripts decide: every count,
 // verdict, plan, render and gate lives behind one command table.
 //   node scripts/review.ts <command> [args]     (Node >= 22.18, zero deps)
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeBriefs } from "./lib/briefs.ts";
@@ -157,6 +157,9 @@ export const COMMANDS: Record<string, Cmd> = {
       if (after) {
         if (!(SHARDED as readonly string[]).includes(after)) throw new Error(`--after must be ${SHARDED.join("|")}`);
         markAttempt(analysis, after as ShardedStage);
+        // The batch is consumed: a later manual invocation re-plans (picking up deferred
+        // work) instead of replaying these args. The driver writes fresh args per batch.
+        rmSync(join(analysis, "plan", `${after}.workflow-args.json`), { force: true });
       }
       const r = runMerge(analysis, flags.final === true ? { final: true } : {});
       if (r.consolidated) console.log(`consolidated ${r.consolidated} duplicate finding(s) into their root-cause finding`);
@@ -280,7 +283,7 @@ export const COMMANDS: Record<string, Cmd> = {
     },
   },
   run: {
-    usage: "run <name> --source <path> [--out dir] [--from stage] [--only stage] [--max-agents N] [--max-usd N] [--offline] [--dry-run] [--runner cmd] [--no-resume] [init flags...]",
+    usage: "run <name> --source <path> [--out dir] [--from stage] [--only stage] [--max-agents N (per batch)] [--allow-deferred] [--max-usd N] [--offline] [--dry-run] [--runner cmd] [--no-resume] [init flags...]",
     run: (pos, flags) => runDriver(pos[0] ?? "", flags, PLUGIN_ROOT),
   },
 };

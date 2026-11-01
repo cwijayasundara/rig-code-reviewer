@@ -16,7 +16,7 @@ function planState(analysis: string, stage: string) {
   const plan = readJson<(Plan & { attempts?: number }) | null>(join(analysis, "plan", `${stage}.json`), null);
   if (!plan) return null;
   const lost = plan.run.filter((t) => !exists(join(analysis, t.out))).map((t) => t.key);
-  return { planned: plan.run.length, lost, deferred: plan.deferred, skipped: plan.skipped.length, attempts: plan.attempts ?? 0, estimate: plan.estimate };
+  return { planned: plan.run.length, lost, deferred: plan.deferred, deferred_accepted: plan.deferred_accepted === true, skipped: plan.skipped.length, attempts: plan.attempts ?? 0, estimate: plan.estimate };
 }
 
 export function buildStatus(analysis: string) {
@@ -30,8 +30,11 @@ export function buildStatus(analysis: string) {
   const wantsSecurity = dims.includes("security");
   const wantsDeep = dims.some((d) => d !== "security");
   // A sharded stage passes when it has run at least once and every planned shard
-  // exists, or after a real retry (attempts >= 2) with the rest recorded as lost.
-  const sharded = (p: ReturnType<typeof planState>) => !!p && p.attempts >= 1 && (p.lost.length === 0 || p.attempts >= 2);
+  // exists, or after a real retry (attempts >= 2) with the rest recorded as lost —
+  // and nothing is left deferred by the agent cap. Deferred work is unfinished,
+  // not a gap: it passes only when `run --allow-deferred` accepted it explicitly.
+  const settled = (p: ReturnType<typeof planState>) => !p || p.deferred.length === 0 || p.deferred_accepted;
+  const sharded = (p: ReturnType<typeof planState>) => !!p && p.attempts >= 1 && (p.lost.length === 0 || p.attempts >= 2) && settled(p);
   const pending = findings.filter((f) => !f.verdict).length;
   const renders = ["ANALYSIS_REPORT.md", "ARCHITECTURE.md", "REPORT.html", "ROADMAP.md"].map((f) => join(analysis, f));
 
@@ -43,7 +46,7 @@ export function buildStatus(analysis: string) {
     deep: !wantsDeep || sharded(plans.deep),
     security: !wantsSecurity || (sharded(plans.security) && exists(join(analysis, "THREAT_MODEL.md"))),
     consolidate: sharded(plans.consolidate),
-    verify: exists(join(analysis, "findings.json")) && pending === 0,
+    verify: exists(join(analysis, "findings.json")) && pending === 0 && settled(plans.verify),
     architecture: arch !== null && validateArchitecture(arch).length === 0,
     report: renders.every(exists) && Math.min(...renders.map(mtime)) >= mtime(join(analysis, "findings.json")),
   };
@@ -78,7 +81,7 @@ export function buildStatus(analysis: string) {
     findings: { total: findings.length, by_verdict, by_severity, by_dimension, accepted: findings.filter((f) => f.accepted).length },
     shards: {
       expected, completed, lost, deferred,
-      plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, p && { planned: p.planned, lost: p.lost.length, deferred: p.deferred.length, skipped: p.skipped, estimate: p.estimate }])),
+      plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, p && { planned: p.planned, lost: p.lost.length, deferred: p.deferred.length, ...(p.deferred_accepted ? { deferred_accepted: true } : {}), skipped: p.skipped, estimate: p.estimate }])),
       oversized_modules: (topo?.modules ?? []).filter((m) => typeof m.lines === "number" && m.lines >= OVERSIZED_LOC).map((m) => m.name),
     },
     coverage: { files_read_pct: coverage.files_read_pct ?? null, failed_scanners: coverage.scanners?.failed?.length ?? 0, missing_scanners: coverage.scanners?.missing ?? [] },

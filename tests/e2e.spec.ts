@@ -69,6 +69,24 @@ test("driver runs every stage, retries a lost shard, renders reconciled reports,
   assert.equal((again.out.match(/gate passes, skipping/g) ?? []).length, 9);
 });
 
+test("the agent cap batches a stage instead of leaving work deferred; --allow-deferred keeps one batch and reports the gap", () => {
+  const src = repo();
+  const r = cli(["run", "bt", "--source", src, "--runner", STUB, "--offline", "--dimensions", "security,quality", "--max-agents", "2"]);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.match(r.out, /security plan \(batch 2\)/);
+  const a = join(src, ".code-review", "bt");
+  const status = JSON.parse(readFileSync(join(a, "status.json"), "utf8"));
+  assert.equal(status.complete, true);
+  assert.deepEqual(status.shards.deferred, [], "nothing left deferred");
+  const src2 = repo();
+  const p = cli(["run", "pd", "--source", src2, "--runner", STUB, "--offline", "--dimensions", "security,quality", "--max-agents", "2", "--allow-deferred"]);
+  assert.equal(p.code, 0, p.out + p.err);
+  assert.doesNotMatch(p.out, /batch 2/);
+  const s2 = JSON.parse(readFileSync(join(src2, ".code-review", "pd", "status.json"), "utf8"));
+  assert.equal(s2.complete, true);
+  assert.ok(s2.shards.deferred.some((k: string) => k.startsWith("security:")), "the accepted gap is named");
+});
+
 test("render refuses when the source changed since assess, and --allow-stale banners it", () => {
   const src = repo();
   assert.equal(cli(["run", "st", "--source", src, "--runner", STUB, "--offline", "--dimensions", "quality"]).code, 0);

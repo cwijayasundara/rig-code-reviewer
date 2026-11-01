@@ -37,3 +37,61 @@ export function suggestModules(analysis: string): { name: string; path: string; 
   if (root.files.length) out.push({ name: "root", path: ".", lines: root.lines, files: root.files.length });
   return out;
 }
+
+// Review units: the topology's modules packed into shards worth one agent each.
+// A map may legitimately name a module per file (good for the architecture
+// report), but sharding 14 tiny modules x 7 dimensions spends one agent's fixed
+// overhead on a 19-line file. Modules are packed in path order (siblings stay
+// together) until a unit reaches MIN_UNIT_LOC, never past MAX_UNIT_LOC; a module
+// at or above MIN_UNIT_LOC, or of unknown size, is always its own unit.
+export const MIN_UNIT_LOC = 1500;
+export const MAX_UNIT_LOC = 4000;
+
+export interface ReviewUnit { name: string; paths: string[]; modules: string[]; lines: number }
+
+/** SLOC under a module path from evidence (authoritative), else the map's own figure; undefined when unknown. */
+function moduleLines(m: { path: string; lines?: number }, sloc: Record<string, number> | undefined): number | undefined {
+  if (sloc && m.path !== "." && m.path !== "") {
+    const p = m.path.replace(/\/+$/, "");
+    let n = 0, hit = false;
+    for (const [f, l] of Object.entries(sloc)) if (f === p || f.startsWith(p + "/")) { n += l; hit = true; }
+    if (hit) return n;
+  }
+  return typeof m.lines === "number" && Number.isFinite(m.lines) ? m.lines : undefined;
+}
+
+function unitName(ms: string[]): string {
+  return ms.length === 1 ? ms[0]! : ms.length <= 3 ? ms.join("+") : `${ms[0]}+${ms.length - 1}-more`;
+}
+
+export function packUnits(
+  modules: { name: string; path: string; lines?: number }[],
+  sloc?: Record<string, number>,
+  opts: { min?: number; max?: number } = {},
+): ReviewUnit[] {
+  const min = opts.min ?? MIN_UNIT_LOC, max = opts.max ?? MAX_UNIT_LOC;
+  const sized = modules.map((m) => ({ ...m, size: moduleLines(m, sloc) }))
+    .sort((a, b) => a.path.localeCompare(b.path) || a.name.localeCompare(b.name));
+  type Slot = ReviewUnit & { packed: boolean };
+  const units: Slot[] = [];
+  let cur: Slot | null = null;
+  for (const m of sized) {
+    if (m.size === undefined || m.size >= min) {
+      if (cur) units.push(cur);
+      cur = null;
+      units.push({ name: m.name, paths: [m.path], modules: [m.name], lines: m.size ?? 0, packed: false });
+      continue;
+    }
+    if (cur && (cur.lines >= min || cur.lines + m.size > max)) { units.push(cur); cur = null; }
+    cur ??= { name: "", paths: [], modules: [], lines: 0, packed: true };
+    cur.paths.push(m.path); cur.modules.push(m.name); cur.lines += m.size;
+  }
+  if (cur) {
+    // An undersized last unit joins the previous packed unit when it still fits.
+    const prev = units[units.length - 1];
+    if (cur.lines < min && prev?.packed && prev.lines + cur.lines <= max) {
+      prev.paths.push(...cur.paths); prev.modules.push(...cur.modules); prev.lines += cur.lines;
+    } else units.push(cur);
+  }
+  return units.map(({ packed: _p, ...u }) => ({ ...u, name: u.name || unitName(u.modules) }));
+}

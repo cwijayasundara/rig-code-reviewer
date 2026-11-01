@@ -11,11 +11,11 @@ import { toSarif } from "../scripts/lib/exports.ts";
 import type { Finding } from "../scripts/lib/types.ts";
 import { APP, ROOT, cli, put, tree } from "./testkit.ts";
 
-function review(dims = "quality,performance,security", modules = 3) {
+function review(dims = "quality,performance,security", modules = 3, lines = 2000) {
   const src = tree({ "src/app.py": APP });
   assert.equal(cli(["init", "p", "--source", src, "--dimensions", dims]).code, 0);
   const a = join(src, ".code-review", "p");
-  put(a, "topology.json", { modules: Array.from({ length: modules }, (_, i) => ({ name: `m${i}`, path: "src", lines: 10 })), edges: [] });
+  put(a, "topology.json", { modules: Array.from({ length: modules }, (_, i) => ({ name: `m${i}`, path: `src/m${i}`, lines })), edges: [] });
   put(a, "evidence.json", { languages: { Python: { files: 1, lines: 6 } }, files: ["src/app.py"] });
   return { src, a };
 }
@@ -25,7 +25,7 @@ test("deep plan: module x dimension, cap defers (named) instead of dropping, res
   let p = buildPlan(a, "deep", { maxAgents: 4 });
   assert.equal(p.run.length, 4);
   assert.equal(p.deferred.length, 2);
-  assert.match(p.estimate.formula, /3 modules x 2 dimensions/);
+  assert.match(p.estimate.formula, /3 units x 2 dimensions/);
   put(a, `raw/deep/${p.run[0]!.key}.json`, { shard: p.run[0]!.key, filesRead: [], notReached: [], findings: [] });
   p = buildPlan(a, "deep", { maxAgents: 4 });
   assert.equal(p.skipped.length, 1);
@@ -132,4 +132,42 @@ test("sticky final never passes off new unverified findings as verified", async 
   shard([finding, { ...finding, line: 2, title: "another", category: "naming" }]);
   const r = runMerge(a);
   assert.equal(r.by_verdict.pending, 2, "a new id clears final: both await verification again");
+});
+
+test("deep/security plans shard per review unit: tiny modules are packed and the brief names every module", () => {
+  const { a } = review("quality,security", 4, 50);
+  const deep = buildPlan(a, "deep");
+  assert.equal(deep.run.length, 1, "4 modules x 1 dimension packed into one unit");
+  assert.match(deep.estimate.formula, /4 modules packed into 1 review units/);
+  assert.deepEqual(deep.run[0]!.input.modules, ["m0", "m1", "m2", "m3"]);
+  const sec = buildPlan(a, "security");
+  assert.equal(sec.run.filter((t) => t.agent === "threat-modeler").length, 1);
+  const audit = sec.run.find((t) => t.agent === "security-auditor" && t.input.category)!;
+  assert.equal(audit.input.threat, `threat/${sec.run[0]!.key.replace(/^threat--/, "")}.md`);
+  writeBriefs(a, "/src", deep);
+  const brief = readFileSync(join(a, `briefs/deep/${deep.run[0]!.key}.md`), "utf8");
+  assert.match(brief, /modules m0, m1, m2, m3 \(paths: src\/m0, src\/m1, src\/m2, src\/m3/);
+});
+
+test("a panel larger than the agent cap runs alone instead of starving", () => {
+  const { a } = review("security", 1);
+  put(a, "findings.json", { version: 1, findings: [{ id: "SEC-00000001", dimension: "security", severity: "High", confidence: "high", file: "src/app.py", line: 4, title: "t", evidence: "e", impact: "i", recommendation: "r", effort: "S", fingerprint: "v1:x", category: "CWE-89", reporters: 1, shards: [] }] });
+  assert.equal(buildPlan(a, "verify", { maxAgents: 2 }).run.length, 3);
+});
+
+test("a sharded stage with deferred work is not done; only an explicit --allow-deferred acceptance passes it", async () => {
+  const { markAttempt } = await import("../scripts/lib/plan.ts");
+  const { src, a } = review("quality,performance", 3);
+  put(a, "PREFLIGHT.md", "x"); put(a, "ASSESSMENT.md", "x"); put(a, "evidence.json", { files: [] }); stampRevision(a, src);
+  put(a, "topology.json", { modules: [0, 1, 2].map((i) => ({ name: `m${i}`, path: `src/m${i}`, lines: 2000 })), edges: [], entry_points: [], data_stores: [], externals: [], flows: [], observations: [] });
+  const p = buildPlan(a, "deep", { maxAgents: 2 });
+  for (const t of p.run) put(a, t.out, { shard: t.key, filesRead: [], notReached: [], findings: [] });
+  markAttempt(a, "deep");
+  let s = buildStatus(a);
+  assert.equal(s.stages.find((x) => x.stage === "deep")!.status, "pending", "4 deferred shards: not done");
+  assert.equal(s.next_command, "/code-review-harness:review-deep p");
+  buildPlan(a, "deep", { maxAgents: 2, acceptDeferred: true });
+  s = buildStatus(a);
+  assert.equal(s.stages.find((x) => x.stage === "deep")!.status, "done");
+  assert.equal(s.shards.deferred.length, 4, "accepted deferral is still reported as a gap");
 });

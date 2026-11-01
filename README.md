@@ -34,7 +34,7 @@ The harness is loaded per project: a review only needs the plugin in the session
 /code-review-harness:review-run <name> --source . --max-usd 25
 ```
 
-**Budget:** each stage process carries ~$0.25–0.35 of fixed overhead, then agents scale with modules × dimensions and with findings (security findings cost three verifier votes each). Live runs measured ~$4–6 for a 20-line seeded repository with all eight dimensions; set `--max-usd` and read the per-stage estimate the driver prints before each sharded stage (estimates self-calibrate from `usage.json`). When the cap is reached mid-stage, unfinished panels become needs-human — never silently confirmed.
+**Budget:** each stage process carries ~$0.25–0.35 of fixed overhead, then agents scale with review units × dimensions and with findings (security findings cost three verifier votes each). Live runs measured ~$4–6 for a 20-line seeded repository with all eight dimensions; set `--max-usd` and read the per-stage estimate the driver prints before each sharded stage (estimates self-calibrate from `usage.json`). The driver checks the budget before every batch of `--max-agents` tasks; when it is reached, the run stops with the resume command and the remaining work stays queued. Unfinished panels become needs-human — never silently confirmed.
 
 **Watching a run:** the driver prints `live log: tail -f <analysis>/run.log`. That log carries every tool call and agent start of every stage as it happens (type `! tail -f …` to stream it into the session). A status line under the prompt shows stage · elapsed · tool calls · agents · cost for the whole run. The "Code review" pane opens by itself when a run starts (on terminals 144 columns or wider), or any time with `/review-dashboard`. In chat, the skill relays each stage start and finish through `review.ts watch <name>`.
 
@@ -46,8 +46,8 @@ One fresh headless Claude process per stage (context isolation by construction),
 | preflight | stack, scope boundary, missing source, execution status → `PREFLIGHT.md` | model |
 | assess | inventory, SLOC, complexity, churn × complexity hotspots, ownership/bus factor, scanner packs → `evidence.json`; tree fingerprint → `REVISION.json`; analyst `ASSESSMENT.md` | script + model |
 | map | modules (oversized dirs auto-split), typed edges, entry points, data stores, flows → `topology.json` (validated) | model |
-| deep | one specialist per module × dimension, from a script-computed plan → `raw/deep/*` | agents |
-| security | threat model per component, component × category sweep, gap-fill sweeps → `raw/security/*` | agents |
+| deep | one specialist per review unit × dimension (small modules packed into units of ≥1,500 SLOC), from a script-computed plan → `raw/deep/*` | agents |
+| security | threat model per review unit, unit × category sweep, gap-fill sweeps → `raw/security/*` | agents |
 | consolidate | duplicates across dimensions removed: script groups co-located findings, a consolidator decides which share one root cause, script validates and merges → `consolidate/*` | agents + script |
 | verify | merge (dedupe, fingerprint, stable ids) → independent verifier per finding; security: REACHABILITY / IMPACT / DEFENSES panel → `votes/*` → verdicts computed | agents + script |
 | architecture | ISO 25010 scorecard (evidence or "unavailable"), reconstructed ADRs, per-module dispositions → `architecture.json` (validated) | model |
@@ -59,7 +59,7 @@ One fresh headless Claude process per stage (context isolation by construction),
 - **Nothing reaches the roadmap without a verdict.** Security: 2 of 3 lenses must confirm; final severity = median of confirming votes, never raised; `high` confidence only on 3/3; incomplete panels become needs-human. Other dimensions: one verifier on a different model tier, which may lower but never raise severity.
 - **One defect, one finding.** Exact duplicates are merged by script (same path and CWE-1003 category within 3 lines; security-shaped reports from other dimensions fold into the security finding); co-located findings from different dimensions are consolidated by a decision the script validates before applying. The report lists what each finding was "also reported as".
 - **Scripts own every number.** Findings are merged, deduplicated, fingerprinted (`v1:sha256(category|path|±3 lines)` — survives line shifts) and given stable ids (`SEC-1a2b3c4d`) by `scripts/review.ts`; the guard denies the model writing any script-owned file.
-- **Honest coverage.** Every top-level directory is scanned or set aside with a reason; agents report `filesRead` / `notReached`; lost and deferred shards are named. A dimension with gaps says "not fully covered", not "no findings".
+- **Honest coverage.** Every top-level directory is scanned or set aside with a reason; agents report `filesRead` / `notReached`; lost shards are named, and work over the agent cap runs in later batches (`--allow-deferred` accepts it as a named gap instead). A dimension with gaps says "not fully covered", not "no findings".
 - **Reports are tied to code.** `render` refuses if the tree changed since assess (or renders with a STALE banner on `--allow-stale`).
 - **Repeat reviews.** `scope --baseline <name>` adds "new / no longer reported / persisting" by fingerprint. `/code-review-harness:review-accept` (human-only) records accepted risk; SARIF marks it suppressed.
 

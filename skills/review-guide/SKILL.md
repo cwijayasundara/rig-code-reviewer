@@ -9,7 +9,7 @@ architecture · security · quality (correctness/maintainability) · performance
 # Rubric
 - Severity = how bad if real (Blocker/Critical/High/Medium/Low/Nit). Confidence = how sure (high: executable code proves it; medium: strong inference; low: plausible).
 - Roadmap order: severity → confidence → effort (quick wins first). Only `confirmed`, non-accepted findings enter it.
-- Security verdicts: three lenses, ≥2 confirm → confirmed, ≥2 refute → refuted, else needs-human; final severity = median of confirming votes, never raised; `high` confidence only on 3/3. Incomplete panels → needs-human. Over-cap → deferred (coverage gap).
+- Security verdicts: three lenses, ≥2 confirm → confirmed, ≥2 refute → refuted, else needs-human; final severity = median of confirming votes, never raised; `high` confidence only on 3/3. Incomplete panels → needs-human. Over-cap → deferred: run in the next batch, never silently dropped; only `review-run --allow-deferred` accepts them as a coverage gap.
 - Other dimensions: one independent verifier (different model tier); it may lower, never raise, severity.
 
 # Duplicates

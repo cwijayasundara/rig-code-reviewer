@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Fixed — a resumed review never ran its deferred work**
+- A sharded stage (deep, security, consolidate, verify) passed its gate while tasks over the agent cap were still deferred, so `/review-run` moved on, and a resume skipped the stage for good. A real 2,457-line review ended with 74 of 98 deep shards, 49 of 73 security tasks and 61 of 85 verifier tasks deferred, 55% of files read, and no report. A stage now passes only when nothing is deferred. The driver runs a stage in batches of `--max-agents` until it is finished, and checks `--max-usd` before every batch; a budget stop leaves the remaining work for the resume. `--allow-deferred` keeps the old single capped batch and reports the rest as a named coverage gap.
+- `merge --after <stage>` now consumes `plan/<stage>.workflow-args.json`, so a manual stage run re-plans (`plan --continue-deferred`) instead of replaying a finished batch.
+- A 3-lens security panel could never fit under `--max-agents` 1 or 2 and stayed deferred forever. A group larger than the cap now runs alone in its own batch.
+
+**Changed — shards are per review unit, not per module**
+- The map may name a module per file, which is useful for the architecture report but costly for sharding: 14 modules × 7 dimensions spent one agent's fixed overhead on a 19-line file. `plan` now packs topology modules in path order into review units of at least 1,500 SLOC (never past 4,000; SLOC from `evidence.json`). A module at or above the floor, or of unknown size, stays alone. The same review now plans 7 deep tasks instead of 98, and 8 security tasks instead of 73. Briefs list every module and path in the unit, and each security audit names its own threat map.
+
 **Fixed — a running review was invisible**
 - `/review-run` buffered each stage process (`spawnSync` + `--output-format json`), so nothing appeared until a stage ended, and the model ran it in the background with no follow-up. Stages now run with `--output-format stream-json --verbose`; every tool call and agent start streams to the terminal and to `<analysis>/run.log` (timestamped, `tail -f`-able) as it happens, and the run's live state goes to `<analysis>/progress.json`.
 - The status Mod drew only into the Spinner, which is not shown once a turn ends, and refreshed only on turn boundaries. It now polls every 2 s, pins a status line under the prompt (stage n/10 · elapsed · tool calls · agents · last activity · findings · cost), and opens a "Code review" pane (stages, per-stage cost, findings, run.log tail) automatically when a run starts, or on `/review-dashboard`. A run with no driver event for 20 min is flagged, not shown as healthy.

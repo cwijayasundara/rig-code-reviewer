@@ -105,6 +105,8 @@ export interface Plan {
   skipped: string[];
   deferred: string[];
   estimate: { agents: number; usd: number; formula: string };
+  /** Set only by `run --allow-deferred`: the stage may pass with deferred work, reported as a coverage gap. */
+  deferred_accepted?: boolean;
 }
 
 export const SEV_RANK: Record<Severity, number> = { Blocker: 0, Critical: 0, High: 1, Medium: 2, Low: 3, Nit: 4 };

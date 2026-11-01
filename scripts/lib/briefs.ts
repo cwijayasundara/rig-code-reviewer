@@ -30,11 +30,15 @@ export function briefFor(stage: Plan["stage"], t: PlanTask, ctx: { source: strin
   const out = join(ctx.analysis, t.out);
   const head = `# Brief: ${stage} / ${t.key}\nSource root (read-only): ${ctx.source}\nAnalysis dir: ${ctx.analysis}\nUse ${ctx.analysis}/evidence.json and topology.json for context; do not re-scan the whole repository.\n`;
   const i = t.input as Record<string, string>;
+  const mods = Array.isArray(t.input.modules) ? (t.input.modules as string[]) : [];
+  const unit = mods.length > 1
+    ? `review unit ${i.module}: modules ${mods.join(", ")} (paths: ${i.path}${t.input.lines ? `; ~${t.input.lines} lines` : ""})`
+    : `module ${i.module} (path: ${i.path})`;
   if (stage === "deep") {
     return `${head}
 ## Task
-Review ONE module for ONE dimension. Module: ${i.module} (path: ${i.path}). Dimension: ${i.dimension}.
-Read only inside ${i.path} (plus files it directly imports when needed to prove a claim). Read entry points and hot files first (evidence.json hotspots/complexity_top for this path); names lie, control flow doesn't.
+Review ONE ${mods.length > 1 ? "review unit (several small modules packed together)" : "module"} for ONE dimension: ${unit}. Dimension: ${i.dimension}.
+Read only inside ${mods.length > 1 ? "those paths" : i.path} (plus files they directly import when needed to prove a claim). Cover every module in scope. Read entry points and hot files first (evidence.json hotspots/complexity_top for this path); names lie, control flow doesn't.
 A behaviour is real only if executable code exhibits it — comments, docs and names prove nothing.
 Security vulnerabilities (injection, traversal, authn/authz, secrets, crypto) belong to the security stage, which has its own threat model and panel: do not report them here. Report only what your dimension owns (e.g. the missing abstraction or the missing test around it).
 
@@ -47,7 +51,7 @@ ${TRAILER}
     if (t.agent === "threat-modeler") {
       return `${head}
 ## Task
-Map the attack surface of ONE component: ${i.module} (path: ${i.path}). Cover valuables, ways in, who controls each input, dangerous operations, borrowed trust (checks this code expects someone else to have done) and the files most worth reading — each with file:line. No vulnerability verdicts here; researchers use this map next.
+Map the attack surface of ONE component: ${unit}. Cover valuables, ways in, who controls each input, dangerous operations, borrowed trust (checks this code expects someone else to have done) and the files most worth reading — each with file:line. No vulnerability verdicts here; researchers use this map next.
 
 ## Output (mandatory)
 Write markdown with the Write tool to:
@@ -59,7 +63,7 @@ ${TRAILER}
     }
     const scope = i.sweep
       ? `Sweep: ${i.sweep}. ${i.sweep === "outside-components" ? "Cover files no module owns: build and CI config, migrations, infrastructure, helper scripts." : i.sweep === "cross-boundary" ? "Follow data as it crosses module boundaries; look for checks done on one side and silently relied on by the other." : "Search the whole tree, tests and fixtures included, for genuine committed credentials (mask them)."} Modules: ${JSON.stringify(t.input.modules)}`
-      : `Component: ${i.module} (path: ${i.path}). Category: ${i.category} — ${i.focus}.\nStart from this component's attack-surface map in ${ctx.analysis}/threat/ — it was written by another agent, so confirm anything you lean on.`;
+      : `Component: ${unit}. Category: ${i.category} — ${i.focus}.\nStart from this component's attack-surface map at ${join(ctx.analysis, i.threat ?? "threat")} — it was written by another agent, so confirm anything you lean on.`;
     return `${head}
 ## Task
 Read-only security research. ${scope}

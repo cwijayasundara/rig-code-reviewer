@@ -9,6 +9,7 @@ import { DIMENSIONS, LENSES, SEV_RANK, CONF_RANK, type Finding, type Plan, type 
 import { candidateGroups, validateDecision } from "./consolidate.ts";
 import { preConsolidation } from "./merge.ts";
 import { exists, readJson, writeJson } from "./util.ts";
+import { packUnits, type ReviewUnit } from "./modules.ts";
 
 export const AGENT: Record<string, string> = {
   architecture: "architecture-critic", quality: "quality-reviewer", performance: "performance-reviewer",
@@ -51,7 +52,7 @@ function calibrated(analysis: string, stage: keyof typeof USD_PER_AGENT): number
   return rec ? rec.total_cost_usd / rec.agents! : USD_PER_AGENT[stage];
 }
 
-export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgents?: number; continueDeferred?: boolean } = {}): Plan {
+export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgents?: number; continueDeferred?: boolean; acceptDeferred?: boolean } = {}): Plan {
   const scope = loadScope(analysis);
   if (!scope) throw new Error(`no scope.json in ${analysis}`);
   const cap = opts.maxAgents ?? scope.max_agents ?? 24;
@@ -59,30 +60,36 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
   const topo = readJson<{ modules?: { name: string; path: string; lines?: number }[] }>(join(analysis, "topology.json"), {});
   const modules = (topo.modules ?? []).filter((m) => m && m.name);
   if ((stage === "deep" || stage === "security") && !modules.length) throw new Error("topology.json has no modules — run /code-review-harness:review-map first");
+  // Shards are per review unit, not per module: tiny modules are packed together
+  // so each agent gets a worthwhile slice (see packUnits).
+  const sloc = readJson<{ file_sloc?: Record<string, number> }>(join(analysis, "evidence.json"), {}).file_sloc;
+  const units: ReviewUnit[] = stage === "deep" || stage === "security" ? packUnits(modules, sloc) : [];
+  const unitInput = (u: ReviewUnit) => ({ module: u.name, path: u.paths.join(", "), paths: u.paths, modules: u.modules, lines: u.lines });
+  const unitsNote = units.length < modules.length ? ` (${modules.length} modules packed into ${units.length} review units)` : "";
 
   // Ordered candidate tasks; groups are capped atomically (a 3-lens panel is never split).
   const groups: PlanTask[][] = [];
   let formula = "";
   if (stage === "deep") {
     const dims = scope.dimensions.filter((d) => d !== "security" && (DIMENSIONS as readonly string[]).includes(d));
-    for (const m of modules) for (const d of dims) {
-      const key = `${d}--${slug(m.name)}`;
-      groups.push([{ key, agent: AGENT[d]!, out: `raw/deep/${key}.json`, input: { module: m.name, path: m.path, dimension: d } }]);
+    for (const u of units) for (const d of dims) {
+      const key = `${d}--${slug(u.name)}`;
+      groups.push([{ key, agent: AGENT[d]!, out: `raw/deep/${key}.json`, input: { ...unitInput(u), dimension: d } }]);
     }
-    formula = `${modules.length} modules x ${dims.length} dimensions`;
+    formula = `${units.length} units x ${dims.length} dimensions${unitsNote}`;
   } else if (stage === "security") {
     const ev = readJson<{ languages?: Record<string, unknown> }>(join(analysis, "evidence.json"), {});
     const unmanaged = Object.keys(ev.languages ?? {}).some((l) => UNMANAGED.test(l));
     let cats = Object.keys(SECURITY_CATEGORIES).filter((c) => c !== "memory-and-unsafe" || unmanaged);
     if (scope.security_effort === "low") cats = cats.slice(0, 2);
-    for (const m of modules) groups.push([{ key: `threat--${slug(m.name)}`, agent: "threat-modeler", out: `threat/${slug(m.name)}.md`, input: { module: m.name, path: m.path } }]);
-    for (const m of modules) for (const c of cats) {
-      const key = `${slug(m.name)}--${c}`;
-      groups.push([{ key, agent: "security-auditor", out: `raw/security/${key}.json`, input: { module: m.name, path: m.path, category: c, focus: SECURITY_CATEGORIES[c as keyof typeof SECURITY_CATEGORIES] } }]);
+    for (const u of units) groups.push([{ key: `threat--${slug(u.name)}`, agent: "threat-modeler", out: `threat/${slug(u.name)}.md`, input: unitInput(u) }]);
+    for (const u of units) for (const c of cats) {
+      const key = `${slug(u.name)}--${c}`;
+      groups.push([{ key, agent: "security-auditor", out: `raw/security/${key}.json`, input: { ...unitInput(u), threat: `threat/${slug(u.name)}.md`, category: c, focus: SECURITY_CATEGORIES[c as keyof typeof SECURITY_CATEGORIES] } }]);
     }
     const sweeps = scope.security_effort === "low" ? [] : ["outside-components", "cross-boundary", "secrets-everywhere"];
     for (const s of sweeps) groups.push([{ key: `sweep--${s}`, agent: "security-auditor", out: `raw/security/sweep--${s}.json`, input: { sweep: s, modules: modules.map((m) => m.path) } }]);
-    formula = `${modules.length} threat models + ${modules.length} modules x ${cats.length} categories + ${sweeps.length} sweeps` + (unmanaged ? "" : " (memory-and-unsafe dropped: managed languages only)");
+    formula = `${units.length} threat models + ${units.length} units x ${cats.length} categories + ${sweeps.length} sweeps${unitsNote}` + (unmanaged ? "" : " (memory-and-unsafe dropped: managed languages only)");
   } else if (stage === "consolidate") {
     const cands = candidateGroups(preConsolidation(analysis));
     for (const g of cands) groups.push([{ key: g.key, agent: "finding-consolidator", out: `consolidate/${g.key}.json`, input: { group: g.key, file: g.file, members: g.members } }]);
@@ -111,7 +118,9 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
     const todo = g.filter((t) => !shardDone(analysis, t.out, scope.source));
     g.filter((t) => !todo.includes(t)).forEach((t) => skipped.push(t.key));
     if (!todo.length) continue;
-    if (g.some((t) => prevDeferred.has(t.key)) || used + todo.length > cap) { todo.forEach((t) => deferred.push(t.key)); continue; }
+    // A group larger than the cap (a 3-lens panel under --max-agents 2) runs alone
+    // in its own batch rather than waiting forever.
+    if (g.some((t) => prevDeferred.has(t.key)) || (used > 0 && used + todo.length > cap)) { todo.forEach((t) => deferred.push(t.key)); continue; }
     run.push(...todo); used += todo.length;
   }
   const usd = Math.round(run.length * calibrated(analysis, stage) * 100) / 100;
@@ -120,6 +129,7 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
     estimate: { agents: run.length, usd, formula: `${formula}; running ${run.length}, skipped ${skipped.length} (done), deferred ${deferred.length} (cap ${cap})` },
     // attempts counts real stage executions (markAttempt), never plan rebuilds.
     attempts: (prev as (Plan & { attempts?: number }) | null)?.attempts ?? 0,
+    ...(opts.acceptDeferred && deferred.length ? { deferred_accepted: true } : {}),
   };
   writeJson(join(analysis, "plan", `${stage}.json`), plan);
   return plan;

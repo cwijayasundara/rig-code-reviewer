@@ -146,6 +146,57 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
     return rc;
   };
 
+  const maxAgents = str(flags["max-agents"]) ? Number(flags["max-agents"]) : undefined;
+  const allowDeferred = flags["allow-deferred"] === true;
+
+  // A sharded stage runs in batches of at most --max-agents tasks until nothing
+  // is deferred (the cap bounds one workflow, not the stage). Each batch: plan →
+  // spawn → one retry of lost shards → merge. The budget is checked before every
+  // batch; a stop leaves the remaining work deferred and the resume command runs it.
+  // `--allow-deferred` restores a single capped batch and accepts the rest as a gap.
+  const runSharded = async (stage: ShardedStage): Promise<number | "budget"> => {
+    let lastDeferred = Number.POSITIVE_INFINITY;
+    for (let batch = 1; ; batch++) {
+      if (stage === "verify" || stage === "consolidate") runMerge(analysis, { final: false });
+      const plan = buildPlan(analysis, stage, { maxAgents, continueDeferred: true, acceptDeferred: allowDeferred });
+      if (!plan.run.length) {
+        markAttempt(analysis, stage);
+        runMerge(analysis, stage === "verify" ? { final: true } : {});
+        if (batch === 1) say(`--- ${stage}: nothing to run`);
+        return 0;
+      }
+      if (batch > 1 && maxUsd !== undefined && spent(analysis) >= maxUsd) {
+        writeStatus(analysis);
+        warn(`stopping ${stage} before batch ${batch}: budget $${maxUsd} reached (spent $${spent(analysis).toFixed(2)}); ${plan.run.length + plan.deferred.length} task(s) still to run. Resume: /code-review-harness:review-run ${name} --source ${source} --max-usd <higher>`);
+        return "budget";
+      }
+      say(`--- ${stage} plan${batch > 1 ? ` (batch ${batch})` : ""}: ${plan.estimate.formula} · est. ~$${plan.estimate.usd}`);
+      if (maxUsd !== undefined && spent(analysis) + plan.estimate.usd > maxUsd) say(`    warning: estimate exceeds remaining budget; --max-budget-usd will stop the stage at the cap`);
+      writeArgs(analysis, scope.source, plan);
+      const before = attemptsOf(analysis, stage);
+      let rc = await spawnStage(stage, plan.run.length);
+      if (rc === 0) {
+        if (attemptsOf(analysis, stage) === before) markAttempt(analysis, stage); // unless the skill's `merge --after` did
+        const st = buildStatus(analysis).shards.plans[stage];
+        if (st && st.lost > 0) {
+          // One retry for lost shards; after that they are recorded as coverage gaps.
+          say(`--- ${stage}: ${st.lost} shard(s) lost; retrying once`);
+          const retry = buildPlan(analysis, stage, { maxAgents, acceptDeferred: allowDeferred });
+          writeArgs(analysis, scope.source, retry);
+          const b2 = attemptsOf(analysis, stage);
+          rc = await spawnStage(stage, retry.run.length);
+          if (rc === 0 && attemptsOf(analysis, stage) === b2) markAttempt(analysis, stage);
+        }
+      }
+      runMerge(analysis, stage === "verify" ? { final: true } : {}); // THREAT_MODEL.md, coverage, findings
+      if (rc !== 0) return rc;
+      if (allowDeferred || !plan.deferred.length) return 0;
+      if (plan.deferred.length >= lastDeferred) { warn(`error: ${stage} batch ${batch} made no progress on ${plan.deferred.length} deferred task(s)`); return 1; }
+      lastDeferred = plan.deferred.length;
+      say(`--- ${stage}: batch ${batch} done · ${plan.deferred.length} deferred task(s) remain, running the next batch`);
+    }
+  };
+
   try {
     for (const stage of stages) {
       // --from/--only force their stages to run again (the code or prompts changed).
@@ -155,43 +206,15 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
         return 4;
       }
       if (stage === "assess" && !dry) cli(pluginRoot, ["evidence", name, ...(flags.offline === true ? ["--offline"] : [])], source, log);
-      let agents: number | undefined;
+      let rc = 0;
       if (isSharded(stage) && !dry) {
-        if (stage === "verify" || stage === "consolidate") runMerge(analysis, { final: false });
         const wants = stage === "security" ? scope.dimensions.includes("security") : stage === "deep" ? scope.dimensions.some((d) => d !== "security") : true; // consolidate + verify always
         if (!wants) { say(`--- ${stage}: not in scope dimensions, skipped`); continue; }
-        // One plan per stage execution: deferred work from an earlier invocation is
-        // retried first (the cap applies per invocation); briefs are written here.
-        const plan = buildPlan(analysis, stage, { maxAgents: str(flags["max-agents"]) ? Number(flags["max-agents"]) : undefined, continueDeferred: true });
-        agents = plan.run.length;
-        say(`--- ${stage} plan: ${plan.estimate.formula} · est. ~$${plan.estimate.usd}`);
-        if (maxUsd !== undefined && spent(analysis) + plan.estimate.usd > maxUsd) say(`    warning: estimate exceeds remaining budget; --max-budget-usd will stop the stage at the cap`);
-        if (!plan.run.length) {
-          markAttempt(analysis, stage);
-          runMerge(analysis, stage === "verify" ? { final: true } : {});
-          writeStatus(analysis);
-          if (gate(analysis, stage)) { say(`--- ${stage}: nothing to run`); continue; }
-          warn(`error: ${stage} has nothing left to run but its gate is not met — see ${analysis}/status.json`);
-          return 1;
-        }
-        writeArgs(analysis, scope.source, plan);
-      }
-      const sharded = isSharded(stage);
-      const before = sharded ? attemptsOf(analysis, stage) : 0;
-      let rc = await spawnStage(stage, agents);
-      // One retry for lost shards; after that they are recorded as coverage gaps.
-      if (rc === 0 && !dry && isSharded(stage)) {
-        if (attemptsOf(analysis, stage) === before) markAttempt(analysis, stage); // unless the skill's `merge --after` did
-        const st = buildStatus(analysis).shards.plans[stage];
-        if (st && st.lost > 0) {
-          say(`--- ${stage}: ${st.lost} shard(s) lost; retrying once`);
-          const retry = buildPlan(analysis, stage, { maxAgents: str(flags["max-agents"]) ? Number(flags["max-agents"]) : undefined });
-          writeArgs(analysis, scope.source, retry);
-          const b2 = attemptsOf(analysis, stage);
-          rc = await spawnStage(stage, retry.run.length);
-          if (rc === 0 && attemptsOf(analysis, stage) === b2) markAttempt(analysis, stage);
-        }
-        runMerge(analysis, stage === "verify" ? { final: true } : {}); // THREAT_MODEL.md, coverage, findings
+        const r = await runSharded(stage);
+        if (r === "budget") return 4;
+        rc = r;
+      } else {
+        rc = await spawnStage(stage);
       }
       const status = writeStatus(analysis);
       if (dry) continue;
