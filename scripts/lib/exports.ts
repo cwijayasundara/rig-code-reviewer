@@ -32,7 +32,8 @@ export function toSarif(findings: Finding[], version: string): object {
   }
   const results = reportable.map((f) => {
     const secret = SECRET_CATS.has(f.category) || SECRET_CATS.has(f.cwe ?? "");
-    const msg = redact(`${f.title}. ${secret ? "" : f.impact + " "}Fix: ${f.recommendation}`).text;
+    const corrected = f.corrections?.length ? ` Corrected by verification: ${f.corrections.map((c) => `${c.field}: "${c.claim}" → ${c.correction}`).join("; ")}.` : "";
+    const msg = redact(`${f.title}. ${secret ? "" : f.impact + " "}Fix: ${f.recommendation}${corrected}`).text;
     return {
       ruleId: ruleId(f),
       level: LEVEL[f.severity] ?? "warning",
@@ -42,7 +43,7 @@ export function toSarif(findings: Finding[], version: string): object {
         region: { startLine: f.line, ...(f.end_line ? { endLine: f.end_line } : {}) },
       } }],
       partialFingerprints: { "codeReviewHarness/v1": f.fingerprint.replace(/^v1:/, "") },
-      properties: { id: f.id, severity: f.severity, confidence: f.confidence, dimension: f.dimension, verdict: f.verdict, reporters: f.reporters, panel: f.verifier_note },
+      properties: { id: f.id, severity: f.severity, confidence: f.confidence, dimension: f.dimension, verdict: f.verdict, reporters: f.reporters, panel: f.verifier_note, ...(f.corrections?.length ? { corrections: f.corrections } : {}) },
       ...(f.accepted ? { suppressions: [{ kind: "external", status: "accepted", justification: redact(f.accepted.reason).text }] } : {}),
     };
   });

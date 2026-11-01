@@ -153,7 +153,8 @@
         "id",
         "lens",
         "verdict",
-        "note"
+        "note",
+        "corrections"
       ],
       "properties": {
         "id": {
@@ -190,6 +191,41 @@
         },
         "evidence": {
           "type": "string"
+        },
+        "corrections": {
+          "type": "array",
+          "description": "Factual errors in the finding's text; [] when accurate.",
+          "items": {
+            "type": "object",
+            "required": [
+              "field",
+              "claim",
+              "correction"
+            ],
+            "properties": {
+              "field": {
+                "enum": [
+                  "title",
+                  "location",
+                  "evidence",
+                  "impact",
+                  "recommendation",
+                  "exploit_scenario"
+                ]
+              },
+              "claim": {
+                "type": "string",
+                "minLength": 1
+              },
+              "correction": {
+                "type": "string",
+                "minLength": 1
+              },
+              "lens": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },
@@ -295,6 +331,41 @@
         },
         "consolidation_note": {
           "type": "string"
+        },
+        "corrections": {
+          "type": "array",
+          "description": "Corrections from confirming verifiers, rendered beside the finding's text.",
+          "items": {
+            "type": "object",
+            "required": [
+              "field",
+              "claim",
+              "correction"
+            ],
+            "properties": {
+              "field": {
+                "enum": [
+                  "title",
+                  "location",
+                  "evidence",
+                  "impact",
+                  "recommendation",
+                  "exploit_scenario"
+                ]
+              },
+              "claim": {
+                "type": "string",
+                "minLength": 1
+              },
+              "correction": {
+                "type": "string",
+                "minLength": 1
+              },
+              "lens": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     }

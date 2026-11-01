@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Fixed — a confirmed finding shipped with text its verifier proved wrong**
+- A verifier that confirmed a finding but found factual errors in it could only say so in its free-text note, which no report shows beside the finding. A live `js-traversal` review published "assert 400 for an array-valued param" as the recommendation after the verifier had shown the code accepts that input, so the recommended test would fail.
+- Every vote now carries `corrections` (`[]` when accurate): field, the wrong claim quoted, what is true. Validated on write; a vote without it is rejected.
+- The script attaches confirming votes' corrections to the finding (exact repeats across lenses shown once) and sends a finding whose `title` or `location` was corrected to needs-human. Refuting lenses' corrections are not attached. Confidence is unchanged: it rates the core claim, and capping it on detail errors dropped a 3/3-confirmed Critical traversal to medium in a live run.
+- ANALYSIS_REPORT.md, ROADMAP.md, the security and dependency tables, REPORT.html and SARIF (message and `properties.corrections`) show the corrections beside the text they replace.
+
 **Added — differential eval against code-modernization**
 - `eval/upstream.ts` runs Anthropic's code-modernization plugin (`modernize-assess` + `modernize-harden`) headlessly on the same seeded cases and scores its reports with the same scorer. Only findings its adversarial pass kept count: refuted rows, coverage gaps, remediation notes and assess's unjudged security table are ignored; a severity range takes its lower bound. `npm run eval:compare` is a parity gate: the harness must catch every defect upstream caught, with no more false positives. First runs (2026-11-01): parity on all 4 cases; harness $19.51 vs upstream $9.73.
 

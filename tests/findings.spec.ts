@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Correction } from "../scripts/lib/types.ts";
 import { applyVotes, categoryFor, mergeShards, panelSeverity, validateRawFinding, validateShard, validateVote } from "../scripts/lib/findings.ts";
 import { categoryOf, normaliseCwe } from "../scripts/lib/cwe.ts";
 import { runMerge } from "../scripts/lib/merge.ts";
@@ -72,7 +73,7 @@ test("panel severity: median of confirming votes, lower tier on ties, never rais
 });
 
 const base = (): Finding => ({ ...sec(), id: "SEC-0123abcd", fingerprint: "v1:x", category: "CWE-89", reporters: 1, shards: ["s"] } as Finding);
-const vote = (lens: Vote["lens"], verdict: Vote["verdict"], severity?: Vote["severity"]): Vote => ({ id: "SEC-0123abcd", lens, verdict, severity, note: "n" });
+const vote = (lens: Vote["lens"], verdict: Vote["verdict"], severity?: Vote["severity"], corrections: Correction[] = []): Vote => ({ id: "SEC-0123abcd", lens, verdict, severity, note: "n", corrections });
 
 test("panel tally computed in code: 2-of-3, confidence clamp, incomplete panels", () => {
   const c = applyVotes(base(), [vote("REACHABILITY", "confirmed"), vote("IMPACT", "confirmed", "Medium"), vote("DEFENSES", "refuted")], { deferred: false, final: false });
@@ -120,7 +121,7 @@ test("runMerge end to end: invalid shards reported, votes applied, accepted risk
   assert.equal(r.findings, 1);
   assert.equal(r.invalid_shards.length, 1);
   const id = JSON.parse(readFileSync(join(a, "findings.json"), "utf8")).findings[0].id as string;
-  for (const lens of ["REACHABILITY", "IMPACT", "DEFENSES"]) put(a, `votes/${id}--${lens}.json`, { id, lens, verdict: "confirmed", note: "path proven" });
+  for (const lens of ["REACHABILITY", "IMPACT", "DEFENSES"]) put(a, `votes/${id}--${lens}.json`, { id, lens, verdict: "confirmed", note: "path proven", corrections: [] });
   r = runMerge(a, { final: true });
   assert.equal(r.by_verdict.confirmed, 1);
   const cov = JSON.parse(readFileSync(join(a, "coverage.json"), "utf8"));
@@ -167,4 +168,44 @@ test("vote files must be named after their content", () => {
 test("redaction gate: code-shaped values are not secrets, literals are", () => {
   assert.deepEqual(validateRawFinding(rf({ recommendation: "use token = crypto.randomBytes(32) and password = os.environ['DB_PASS']" })), []);
   assert.ok(validateRawFinding(rf({ evidence: "password = hunter2pass" })).some((e) => e.includes("credential")));
+});
+
+// ---- verifier corrections: a confirmed finding never ships with text the verifier proved wrong ----
+const wrongRec: Correction = { field: "recommendation", claim: "assert 400 for an array-valued param", correction: "String(['a','b']) is 'a,b', which resolves inside ROOT and is accepted (src/server.js:14)" };
+
+test("corrections: every vote must state them, even as []", () => {
+  const { corrections: _c, ...bare } = vote("VERIFY", "confirmed");
+  assert.ok(validateVote(bare).some((e) => e.includes("corrections")), "a vote without 'corrections' is invalid");
+  assert.ok(validateVote({ ...vote("VERIFY", "confirmed"), corrections: [{ field: "colour", claim: "x", correction: "y" }] }).some((e) => e.includes("field")));
+  assert.ok(validateVote({ ...vote("VERIFY", "confirmed"), corrections: [{ field: "evidence", claim: " ", correction: "y" }] }).some((e) => e.includes("claim")));
+  assert.deepEqual(validateVote(vote("VERIFY", "confirmed", undefined, [wrongRec])), []);
+});
+
+test("corrections: a confirmed finding carries them; confidence (the core claim) is unchanged", () => {
+  const q = { ...base(), dimension: "testing" as const, confidence: "high" as const };
+  const c = applyVotes(q, [vote("VERIFY", "confirmed", "Medium", [wrongRec])], { deferred: false, final: false });
+  assert.equal(c.verdict, "confirmed");
+  assert.deepEqual(c.corrections, [{ ...wrongRec, lens: "VERIFY" }]);
+  assert.equal(c.confidence, "high", "a wrong detail is shown beside the text, not folded into confidence");
+  const clean = applyVotes(q, [vote("VERIFY", "confirmed")], { deferred: false, final: false });
+  assert.equal(clean.corrections, undefined);
+  assert.equal(clean.confidence, "high");
+});
+
+test("corrections: a wrong title or location sends a confirmed finding to needs-human", () => {
+  const q = { ...base(), dimension: "quality" as const };
+  const loc: Correction = { field: "location", claim: "src/a.py:3", correction: "the defect is at src/a.py:40" };
+  const c = applyVotes(q, [vote("VERIFY", "confirmed", undefined, [loc])], { deferred: false, final: false });
+  assert.equal(c.verdict, "needs-human");
+  assert.match(c.verifier_note ?? "", /location/);
+});
+
+test("corrections: a security panel keeps only confirming lenses' corrections", () => {
+  const c = applyVotes(base(), [vote("REACHABILITY", "confirmed", undefined, [wrongRec]), vote("IMPACT", "confirmed"),
+    vote("DEFENSES", "refuted", undefined, [{ field: "impact", claim: "c", correction: "d" }])], { deferred: false, final: false });
+  assert.equal(c.verdict, "confirmed");
+  assert.deepEqual(c.corrections?.map((x) => x.lens), ["REACHABILITY"]);
+  const dup = applyVotes(base(), ["REACHABILITY", "IMPACT", "DEFENSES"].map((l) => vote(l as Vote["lens"], "confirmed", undefined, [wrongRec])), { deferred: false, final: false });
+  assert.equal(dup.corrections?.length, 1, "the same correction from three lenses is shown once");
+  assert.equal(dup.confidence, "high");
 });

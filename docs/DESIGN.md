@@ -17,6 +17,10 @@ plugin (see NOTICE.md) and the conventions of the `rig` SDLC harness.
    Security: three-lens panel (REACHABILITY / IMPACT / DEFENSES), 2-of-3,
    median severity of confirming votes, never raised, `high` confidence only on
    3/3. Other dimensions: one independent verifier on a different model tier.
+   Every vote lists `corrections` (factual errors in the finding's text, `[]` if
+   none). A confirmed finding carries its confirming verifiers' corrections,
+   rendered beside the text in every output (confidence still rates the core
+   claim); a corrected title or location sends it to needs-human.
 4. **Honest coverage.** Every top-level directory is scanned or set aside with
    a reason; failed scanners, lost shards and deferred work are reported as
    gaps. "No findings" is never printed where a finder died.
@@ -44,7 +48,7 @@ plugin (see NOTICE.md) and the conventions of the `rig` SDLC harness.
     raw/<stage>/<shard>.json      # agents (Write, guarded) : {shard, filesRead, notReached, findings[]}
     THREAT_MODEL.md               # model
     findings.json                 # script (merge): deduped, fingerprinted, verdicts computed
-    votes/<id>--<lens>.json       # verifier agents: {id, lens, verdict, severity?, note, evidence}
+    votes/<id>--<lens>.json       # verifier agents: {id, lens, verdict, severity?, note, evidence, corrections[]}
     coverage.json                 # script
     architecture.json             # model, validated (every rating needs evidence or is "unavailable")
     ANALYSIS_NOTES.md             # model prose

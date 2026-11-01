@@ -135,3 +135,8 @@ export function counts(c: Ctx) {
     needs_human: c.needsHuman.length, refuted: c.refuted.length, deferred: c.deferred.length, pending: c.pending.length,
   };
 }
+
+/** One line per verifier correction: "field: \"wrong claim\" → what is true (LENS)". */
+export function correctionText(f: Finding): string[] {
+  return (f.corrections ?? []).map((c) => `${c.field}: "${c.claim}" → ${c.correction}${c.lens ? ` (${c.lens})` : ""}`);
+}

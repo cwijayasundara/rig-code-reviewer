@@ -47,7 +47,7 @@ switch (stage) {
   case "verify":
     for (const [key] of args("verify").tasks) {
       const [id, lens] = key.split("--");
-      put(`votes/${key}.json`, { id, lens, verdict: "confirmed", note: "re-derived from src/app.py:4", evidence: "src/app.py:4" });
+      put(`votes/${key}.json`, { id, lens, verdict: "confirmed", note: "re-derived from src/app.py:4", evidence: "src/app.py:4", corrections: [] });
     }
     break;
   case "architecture":

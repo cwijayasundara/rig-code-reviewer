@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderAll } from "../scripts/lib/report.ts";
+import { writeExports } from "../scripts/lib/exports.ts";
 import type { Finding } from "../scripts/lib/types.ts";
 
 const SECRET = FAKE_AWS_KEY;
@@ -188,4 +189,18 @@ test("rendering is deterministic", () => {
   const a = dir(files), b = dir(files);
   renderAll(a); renderAll(b);
   for (const rel of ["ROADMAP.md", "ANALYSIS_REPORT.md", "ARCHITECTURE.md", "REPORT.html"]) assert.equal(read(a, rel), read(b, rel), rel);
+});
+
+test("verifier corrections render next to the text they correct, in every output", () => {
+  const corrections = [{ field: "recommendation" as const, claim: "assert 400 for an array param", correction: "an array param is accepted (src/a.py:3)", lens: "VERIFY" as const }];
+  const d = dir({ "findings.json": { version: 1, findings: [f("TST-00000001", { dimension: "testing", recommendation: "assert 400 for an array param", corrections })] } });
+  renderAll(d);
+  const md = read(d, "ANALYSIS_REPORT.md");
+  assert.match(md, /Corrected by verification[^\n]*\n\s+- recommendation: .*assert 400 for an array param.*→ an array param is accepted/);
+  assert.match(read(d, "ROADMAP.md"), /TST-00000001[\s\S]*corrected by verification/);
+  assert.match(read(d, "REPORT.html"), /corrected by verification/i);
+  writeExports(d, "test");
+  const sarif = JSON.parse(read(d, "findings.sarif"));
+  assert.match(sarif.runs[0].results[0].message.text, /Corrected by verification: recommendation/);
+  assert.deepEqual(sarif.runs[0].results[0].properties.corrections, corrections);
 });

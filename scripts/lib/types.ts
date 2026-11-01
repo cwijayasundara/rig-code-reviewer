@@ -18,6 +18,13 @@ export type Verdict = (typeof VERDICTS)[number];
 export const LENSES = ["REACHABILITY", "IMPACT", "DEFENSES"] as const;
 export type Lens = (typeof LENSES)[number] | "VERIFY";
 
+/** Parts of a finding's text a verifier can correct. title/location are its core claim. */
+export const CORRECTABLE = ["title", "location", "evidence", "impact", "recommendation", "exploit_scenario"] as const;
+export type Correctable = (typeof CORRECTABLE)[number];
+export const CORE_FIELDS: readonly Correctable[] = ["title", "location"];
+/** A factual error a verifier found in a finding's text: the wrong claim, quoted, and what is true. */
+export interface Correction { field: Correctable; claim: string; correction: string; lens?: Lens }
+
 export const STAGES = ["scope", "preflight", "assess", "map", "deep", "security", "consolidate", "verify", "architecture", "report"] as const;
 export type Stage = (typeof STAGES)[number];
 export const SHARDED = ["deep", "security", "consolidate", "verify"] as const;
@@ -61,6 +68,8 @@ export interface Vote {
   severity?: Severity;
   note: string;
   evidence?: string;
+  /** Required on every vote ([] when the finding's text is accurate). */
+  corrections: Correction[];
 }
 
 export interface Accepted { fingerprint: string; reason: string; by: string; at: string }
@@ -74,8 +83,10 @@ export interface Finding extends RawFinding {
   shards: string[];
   aliases?: string[];
   verdict?: Verdict;
-  votes?: { lens: Lens; verdict: string; severity?: Severity; note: string; evidence?: string }[];
+  votes?: { lens: Lens; verdict: string; severity?: Severity; note: string; evidence?: string; corrections?: Correction[] }[];
   verifier_note?: string;
+  /** Factual errors confirming verifiers found in this finding's text; rendered beside it. */
+  corrections?: Correction[];
   original_severity?: Severity;
   accepted?: Accepted;
   also_reported_as?: string[];

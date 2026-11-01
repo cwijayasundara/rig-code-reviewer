@@ -6,8 +6,8 @@ import { isAbsolute, join, normalize } from "node:path";
 import { categoryOf, normaliseCwe } from "./cwe.ts";
 import { hasSecret } from "./redact.ts";
 import {
-  CONFIDENCES, CONF_RANK, DIM_PREFIX, DIMENSIONS, EFFORTS, LENSES, SEVERITIES,
-  type Accepted, type Confidence, type Finding, type Plan, type RawFinding, type RawShard, type Severity, type Vote,
+  CONFIDENCES, CONF_RANK, CORE_FIELDS, CORRECTABLE, DIM_PREFIX, DIMENSIONS, EFFORTS, LENSES, SEVERITIES,
+  type Accepted, type Confidence, type Correction, type Finding, type Plan, type RawFinding, type RawShard, type Severity, type Vote,
 } from "./types.ts";
 import { exists, readJson, readText, sha256 } from "./util.ts";
 
@@ -63,6 +63,12 @@ export function validateVote(obj: unknown, filename?: string): string[] {
   if (!["confirmed", "refuted", "needs-human"].includes(String(v.verdict))) e.push(`bad verdict ${JSON.stringify(v.verdict)}`);
   if (v.severity !== undefined && !(SEVERITIES as readonly string[]).includes(String(v.severity))) e.push(`bad severity ${JSON.stringify(v.severity)}`);
   if (typeof v.note !== "string" || !v.note.trim()) e.push("missing 'note'");
+  if (!Array.isArray(v.corrections)) e.push("missing 'corrections' (array; [] when the finding's text is accurate)");
+  else v.corrections.forEach((c: unknown, i: number) => {
+    const x = (c ?? {}) as Record<string, unknown>;
+    if (!(CORRECTABLE as readonly string[]).includes(String(x.field))) e.push(`corrections[${i}]: bad field ${JSON.stringify(x.field)} (one of ${CORRECTABLE.join(", ")})`);
+    for (const k of ["claim", "correction"]) if (typeof x[k] !== "string" || !(x[k] as string).trim()) e.push(`corrections[${i}]: missing '${k}'`);
+  });
   if (hasSecret(JSON.stringify(v))) e.push("contains an unredacted credential-shaped value");
   return e;
 }
@@ -213,13 +219,35 @@ export function panelSeverity(original: Severity, confirming: (Severity | undefi
 
 function capConfidence(c: Confidence, cap: Confidence): Confidence { return CONF_RANK[c] >= CONF_RANK[cap] ? c : cap; }
 
+/**
+ * A confirmed finding never ships with text a confirming verifier proved wrong: the
+ * corrections ride on the finding (rendered beside the text), and a corrected title or
+ * location (its core claim) goes to a human instead. Confidence is left alone: it rates the
+ * core claim, which the verdict already settled; a wrong detail is shown, not averaged in.
+ */
+function applyCorrections(out: Finding, confirming: Vote[]): void {
+  if (out.verdict !== "confirmed") return;
+  const seen = new Set<string>();
+  const cs: Correction[] = confirming.flatMap((v) => (v.corrections ?? []).map((c) => ({ field: c.field, claim: c.claim, correction: c.correction, lens: v.lens })))
+    .filter((c) => { const k = `${c.field}|${c.claim.trim().toLowerCase()}`; return seen.has(k) ? false : (seen.add(k), true); }); // lenses often repeat one
+  if (!cs.length) return;
+  out.corrections = cs;
+  const core = cs.filter((c) => CORE_FIELDS.includes(c.field));
+  if (core.length) {
+    out.verdict = "needs-human";
+    out.verifier_note = `confirmed, but the verifier corrected its ${[...new Set(core.map((c) => c.field))].join(" and ")}: ` +
+      core.map((c) => `"${c.claim}" → ${c.correction}`).join("; ") + `. A maintainer must restate the finding. ${out.verifier_note ?? ""}`.trimEnd();
+  }
+}
+
 export function applyVotes(f: Finding, votes: Vote[], opts: { deferred: boolean; final: boolean }): Finding {
   const out: Finding = { ...f, original_severity: f.severity };
   delete out.verdict;
+  delete out.corrections; // recomputed from the current votes on every merge
   if (f.dimension === "security") {
     const byLens = new Map(votes.filter((v) => (LENSES as readonly string[]).includes(v.lens)).map((v) => [v.lens, v]));
     const vs = [...byLens.values()];
-    out.votes = vs.map(({ lens, verdict, severity, note, evidence }) => ({ lens, verdict, severity, note, evidence }));
+    out.votes = vs.map(({ lens, verdict, severity, note, evidence, corrections }) => ({ lens, verdict, severity, note, evidence, corrections }));
     const ok = vs.filter((v) => v.verdict === "confirmed");
     const no = vs.filter((v) => v.verdict === "refuted");
     if (vs.length === 3) {
@@ -230,6 +258,7 @@ export function applyVotes(f: Finding, votes: Vote[], opts: { deferred: boolean;
       } else if (no.length >= 2) out.verdict = "refuted";
       else out.verdict = "needs-human";
       out.verifier_note = `${ok.length}/3 lenses confirmed` + (out.verdict === "needs-human" ? "; split panel — " + vs.map((v) => `${v.lens}: ${v.note}`).join(" | ") : "");
+      applyCorrections(out, ok);
     } else if (opts.deferred && !vs.length) {
       out.verdict = "deferred"; out.verifier_note = "verification deferred (agent cap); coverage gap";
     } else if (opts.final) {
@@ -239,10 +268,11 @@ export function applyVotes(f: Finding, votes: Vote[], opts: { deferred: boolean;
   }
   const v = votes.find((x) => x.lens === "VERIFY");
   if (v) {
-    out.votes = [{ lens: v.lens, verdict: v.verdict, severity: v.severity, note: v.note, evidence: v.evidence }];
+    out.votes = [{ lens: v.lens, verdict: v.verdict, severity: v.severity, note: v.note, evidence: v.evidence, corrections: v.corrections }];
     out.verdict = v.verdict;
     out.verifier_note = v.note;
     if (v.verdict === "confirmed" && v.severity) out.severity = SEV_ORDER(v.severity) >= SEV_ORDER(f.severity) ? v.severity : f.severity;
+    applyCorrections(out, v.verdict === "confirmed" ? [v] : []);
   } else if (opts.deferred) {
     out.verdict = "deferred"; out.verifier_note = "verification deferred (agent cap); coverage gap";
   } else if (opts.final) {

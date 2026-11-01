@@ -1,7 +1,7 @@
 // REPORT.html renderer: one self-contained page, every value escaped.
 import type { Finding } from "./types.ts";
 import type { Ctx } from "./report-ctx.ts";
-import { counts, isStale, panel, uncoveredDimensions, verificationIncomplete } from "./report-ctx.ts";
+import { correctionText, counts, isStale, panel, uncoveredDimensions, verificationIncomplete } from "./report-ctx.ts";
 import { diagrams } from "./report-arch.ts";
 
 export function esc(v: unknown): string {
@@ -47,7 +47,7 @@ function row(f: Finding): string {
     `<td><code>${esc(f.id)}</code></td><td>${esc(f.dimension)}</td><td class="sev sev-${esc(f.severity)}">${esc(f.severity)}</td>` +
     `<td>${esc(f.confidence)}</td><td>${esc(verdict)}${f.votes?.length ? ` (${esc(panel(f))})` : ""}</td>` +
     `<td><code>${esc(f.file)}:${esc(f.line)}</code></td><td>${esc(f.title)}${f.cwe ? ` <span class="muted">${esc(f.cwe)}</span>` : ""}</td>` +
-    `<td>${esc(f.recommendation)}</td></tr>`;
+    `<td>${esc(f.recommendation)}${f.corrections?.length ? `<div class="banner">⚠ Corrected by verification: ${correctionText(f).map(esc).join("<br>")}</div>` : ""}</td></tr>`;
 }
 
 export function reportHtml(c: Ctx): string {

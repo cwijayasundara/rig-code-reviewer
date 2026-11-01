@@ -2,12 +2,18 @@
 import type { Finding } from "./types.ts";
 import { categoryOf } from "./cwe.ts";
 import type { Ctx } from "./report-ctx.ts";
-import { cell, counts, isStale, loc, missing, noneLine, panel, table, uncoveredDimensions, verificationIncomplete } from "./report-ctx.ts";
+import { cell, correctionText, counts, isStale, loc, missing, noneLine, panel, table, uncoveredDimensions, verificationIncomplete } from "./report-ctx.ts";
 
 const NOW = new Set(["Blocker", "Critical", "High"]);
 
+/** A recommendation table cell that never hides a verifier correction. */
+function fixCell(f: Finding): string {
+  return f.corrections?.length ? `${f.recommendation} ⚠ corrected by verification: ${correctionText(f).join("; ")}` : f.recommendation;
+}
+
 function item(f: Finding): string {
-  return `- **${f.id}** [${f.severity}/${f.confidence}, effort ${f.effort}] ${cell(f.title)} — ${loc(f)}\n  - Fix: ${cell(f.recommendation)}`;
+  const fix = `- **${f.id}** [${f.severity}/${f.confidence}, effort ${f.effort}] ${cell(f.title)} — ${loc(f)}\n  - Fix: ${cell(f.recommendation)}`;
+  return correctionText(f).length ? `${fix}\n  - ⚠ corrected by verification — act on these, not the text above: ${correctionText(f).map(cell).join("; ")}` : fix;
 }
 
 export function roadmapMd(c: Ctx): string {
@@ -33,6 +39,7 @@ function findingBlock(f: Finding): string[] {
   const L = [`#### ${f.id} — ${cell(f.title)}`, "",
     `- **Severity / confidence:** ${f.severity} / ${f.confidence}${f.original_severity && f.original_severity !== f.severity ? ` (reported ${f.original_severity}, lowered by verification)` : ""} · **Effort:** ${f.effort}${f.votes?.length ? ` · **Panel:** ${panel(f)} confirmed` : ""}`,
     `- **Where:** ${loc(f)}${f.symbol ? ` (\`${cell(f.symbol)}\`)` : ""}${f.cwe ? ` · **CWE:** ${cell(f.cwe)}` : ""}`,
+    ...(f.corrections?.length ? [`- **⚠ Corrected by verification** (the original text below is kept for the record; these statements replace it):`, ...correctionText(f).map((t) => `  - ${cell(t)}`)] : []),
     `- **Evidence:** ${cell(f.evidence)}`,
     `- **Impact:** ${cell(f.impact)}`,
     `- **Recommendation:** ${cell(f.recommendation)}`];
@@ -117,7 +124,7 @@ export function analysisMd(c: Ctx): string {
   const sec = c.confirmed.filter((f) => f.dimension === "security");
   if (sec.length) {
     L.push(...table(["ID", "CWE", "Category", "Severity", "Panel", "Location", "Exploit", "Fix"],
-      sec.map((f) => [f.id, f.cwe, f.cwe ? categoryOf(f.cwe).name : f.category, f.severity, panel(f), `${f.file}:${f.line}`, f.exploit_scenario, f.recommendation])), "");
+      sec.map((f) => [f.id, f.cwe, f.cwe ? categoryOf(f.cwe).name : f.category, f.severity, panel(f), `${f.file}:${f.line}`, f.exploit_scenario, fixCell(f)])), "");
     L.push(...sec.flatMap(findingBlock));
   } else L.push(noneLine(c, "security", "confirmed security findings"), "");
 
@@ -153,7 +160,7 @@ export function analysisMd(c: Ctx): string {
   L.push("## Dependencies", "");
   if (ev?.manifests?.length) L.push(`- Manifests: ${ev.manifests.map((m: string) => `\`${cell(m)}\``).join(", ")}`, "");
   const deps = c.confirmed.filter((f) => f.dimension === "dependencies");
-  L.push(...(deps.length ? table(["ID", "Severity", "Source", "Location", "Title", "Fix"], deps.map((f) => [f.id, f.severity, f.source ?? "agent", `${f.file}:${f.line}`, f.title, f.recommendation])) : [noneLine(c, "dependencies")]), "");
+  L.push(...(deps.length ? table(["ID", "Severity", "Source", "Location", "Title", "Fix"], deps.map((f) => [f.id, f.severity, f.source ?? "agent", `${f.file}:${f.line}`, f.title, fixCell(f)])) : [noneLine(c, "dependencies")]), "");
 
   // Other dimensions
   L.push("## Findings by dimension", "");

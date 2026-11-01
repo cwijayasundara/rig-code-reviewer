@@ -18,8 +18,9 @@ Rules: every finding points at the exact line where the problem lives — a vagu
 const VOTE_CONTRACT = (out: string, id: string, lens: string) => `## Output (mandatory)
 Write ONE JSON file with the Write tool to:
   ${out}
-Shape: {"id": "${id}", "lens": "${lens}", "verdict": "confirmed|refuted|needs-human", "severity": "<optional: the severity YOUR evidence supports; may be lower, never higher than the candidate>", "note": "one paragraph: why", "evidence": "file:line[, file:line...] you read"}
-Votes are combined by script (verdict, severity and confidence). Judge only your assigned angle.`;
+Shape: {"id": "${id}", "lens": "${lens}", "verdict": "confirmed|refuted|needs-human", "severity": "<optional: the severity YOUR evidence supports; may be lower, never higher than the candidate>", "note": "one paragraph: why", "evidence": "file:line[, file:line...] you read", "corrections": [{"field": "title|location|evidence|impact|recommendation|exploit_scenario", "claim": "the wrong statement, quoted from the finding", "correction": "what is actually true, with file:line"}]}
+"corrections" is required: [] when every statement in the finding you checked is accurate. List EVERY factual error you found in its text, including in a finding you confirm (a recommended test that would fail, a wrong input behaviour, a step that is not needed). Errors written only in "note" are lost: the report shows the finding's own text. A wrong title or location means the core claim is wrong: correct it here and the script sends the finding to a human.
+Votes are combined by script (verdict, severity, confidence and corrections). Judge only your assigned angle.`;
 
 function fence(tag: string, v: unknown): string {
   const body = typeof v === "string" ? v : JSON.stringify(redactValue(v).value, null, 2);

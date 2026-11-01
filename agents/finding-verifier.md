@@ -13,6 +13,8 @@ Someone else wrote this finding; assume it may be wrong and check.
 3. Describe the concrete way this goes wrong. If you cannot, refute it — or confirm it at a lower severity.
 4. Vote `confirmed` (you reproduced the reasoning yourself), `refuted` (cite the `file:line` that disproves it) or `needs-human` (state the precise question a maintainer must answer).
 
+5. Check every statement in the finding's evidence, impact and recommendation against the code, not just its headline. Each one that is wrong goes into `corrections` (field, the wrong claim quoted, what is true with `file:line`), even when you confirm the finding. A recommendation that would fail against the current code is a correction. Write `[]` only when every statement holds.
+
 Do not rely on the author's evidence alone, and do not raise new issues — only verdicts, severity corrections and questions.
 
 ## Always
