@@ -37,8 +37,11 @@ export function score(findings: Finding[], c: Case): Score {
     const primary = live.filter((f) => matches(f, e));
     if (!primary.length || !e.regex) return n;
     const re = new RegExp(e.regex, "i");
+    // A finding that only cross-references the defect in its evidence ("see the SQL injection
+    // finding") is a different finding, not a duplicate: extra primaries count only by title.
+    const named = primary.filter((f) => re.test(f.title));
     return n + live.filter((f) => !primary.includes(f) && f.file === primary[0]!.file && re.test(f.title)
-      && primary.some((p) => Math.abs(p.line - f.line) <= 3)).length + primary.length - 1;
+      && primary.some((p) => Math.abs(p.line - f.line) <= 3)).length + Math.max(0, named.length - 1);
   }, 0);
   return {
     colocated, duplicatesOfMust,

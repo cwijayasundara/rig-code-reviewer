@@ -10,7 +10,9 @@
     "validate": "claude plugin validate .",
     "check": "npm run typecheck && npm test",
     "eval": "node --disable-warning=ExperimentalWarning eval/run.ts",
-    "eval:dry": "node --disable-warning=ExperimentalWarning eval/run.ts --dry"
+    "eval:dry": "node --disable-warning=ExperimentalWarning eval/run.ts --dry",
+    "eval:upstream": "node --disable-warning=ExperimentalWarning eval/upstream.ts",
+    "eval:compare": "node --disable-warning=ExperimentalWarning eval/upstream.ts --compare"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**Added — differential eval against code-modernization**
+- `eval/upstream.ts` runs Anthropic's code-modernization plugin (`modernize-assess` + `modernize-harden`) headlessly on the same seeded cases and scores its reports with the same scorer. Only findings its adversarial pass kept count: refuted rows, coverage gaps, remediation notes and assess's unjudged security table are ignored; a severity range takes its lower bound. `npm run eval:compare` is a parity gate: the harness must catch every defect upstream caught, with no more false positives. First runs (2026-11-01): parity on all 4 cases; harness $19.51 vs upstream $9.73.
+
+**Fixed — eval scoring miscounted true findings**
+- `duplicatesOfMust` counted a different finding as a duplicate when its *evidence* cross-referenced the planted defect ("see the SQL injection finding"); extra primaries now count only when their title names the defect, as the scorer's comment always said.
+- The `safe-twin-flagged` bait rules (`js-traversal`, `py-sqli`) counted any Medium+ finding on the guarded twin, so a confirmed, true "path-containment guard has no test" note scored as a false positive. They now count security findings only — the bait being taken. Reason recorded in each `expected.json`.
+
 **Fixed — a resumed review never ran its deferred work**
 - A sharded stage (deep, security, consolidate, verify) passed its gate while tasks over the agent cap were still deferred, so `/review-run` moved on, and a resume skipped the stage for good. A real 2,457-line review ended with 74 of 98 deep shards, 49 of 73 security tasks and 61 of 85 verifier tasks deferred, 55% of files read, and no report. A stage now passes only when nothing is deferred. The driver runs a stage in batches of `--max-agents` until it is finished, and checks `--max-usd` before every batch; a budget stop leaves the remaining work for the resume. `--allow-deferred` keeps the old single capped batch and reports the rest as a named coverage gap.
 - `merge --after <stage>` now consumes `plan/<stage>.workflow-args.json`, so a manual stage run re-plans (`plan --continue-deferred`) instead of replaying a finished batch.

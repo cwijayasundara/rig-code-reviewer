@@ -3,7 +3,8 @@
   "must": [
     { "id": "traversal", "file": "src/server.js", "regex": "path ?travers|directory travers|CWE-22|CWE-23|arbitrary file", "dimension": "security" }
   ],
+  "mustNotNote": "safe-twin-flagged counts a security finding (Medium+) on the guarded twin, i.e. the bait was taken. Testing/quality notes on the twin (e.g. an untested guard) are true findings, not false positives. Scoped to security 2026-11-01 after a confirmed TST finding on the js-traversal guard was miscounted.",
   "mustNot": [
-    { "id": "safe-twin-flagged", "file": "src/server.js", "lineRange": [13, 18], "minSeverity": "Medium" }
+    { "id": "safe-twin-flagged", "file": "src/server.js", "lineRange": [13, 18], "minSeverity": "Medium", "dimension": "security" }
   ]
 }

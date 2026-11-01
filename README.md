@@ -80,6 +80,8 @@ npm run check        # tsc + node:test (unit, invariants, guard, $0 scripted end
 npm run validate     # claude plugin validate
 npm run eval:dry     # list seeded-defect cases ($0)
 node --disable-warning=ExperimentalWarning eval/run.ts --live --max-usd 5   # paid: recall / false positives per case
+npm run eval:upstream -- --live --max-usd 6 --upstream <path>/plugins/code-modernization   # paid: same cases through code-modernization's assess + harden
+npm run eval:compare # $0: parity gate — the harness must catch what upstream caught, with no more false positives
 ```
 
 Layout: `scripts/review.ts` (one CLI, command table) · `scripts/lib/*` · `skills/*` (thin prompts) · `agents/*` · `workflows/review-tasks.js` · `hooks/` (guards + status Mod) · `data/stacks/*.json` (scanner packs as data) · `data/cwe-categories.json` · `schemas/` · `eval/` · `tests/`. Design: [docs/DESIGN.md](docs/DESIGN.md).
