@@ -6,31 +6,42 @@ It builds on the staged assess → map → review flow of Anthropic's Apache-2.0
 
 ## Install
 
-The harness is loaded per project: a review only needs the plugin in the session that runs it, and nothing is installed globally. Artefacts stay in the reviewed repo's git-ignored `.code-review/` folder, so the reviewed code never depends on the plugin.
+**Requirements:** Node 22.18 or later, `git`, Claude Code 2.1.316 or later (the version this release is tested on; stage processes use `--effort`, `--strict-mcp-config` and `--setting-sources`). Optional scanners: `gitleaks`, `osv-scanner`, `semgrep` (a missing or broken one is reported as a coverage gap, never as clean).
 
-**Requirements:** Node 22.18 or later, `git`, Claude Code 2.1.287 or later. Optional scanners: `gitleaks`, `osv-scanner`, `semgrep` (a missing or broken one is reported as a coverage gap, never as clean).
+**How it differs from rig.** rig is loaded once: `/rig:init` copies its skills, agents, hooks and scripts into the project's own `.claude/` and `.rig/`, so later sessions need no flag. This harness deliberately never copies itself into the repo under review (a reviewer must not change what it reviews), so **every session that uses a `/code-review-harness:` command needs the plugin loaded**: with a flag each time (A), or once per repo with a project-scope install (B). Either way the review's artefacts stay in the reviewed repo's git-ignored `.code-review/` folder.
 
-1. **Load the plugin for one review session.** Start Claude Code from the root of the repo you want reviewed:
+Get the plugin once:
 
-   ```bash
-   PLUGIN=/path/to/your/clone          # the folder that contains .claude-plugin/plugin.json
-   ls "$PLUGIN/.claude-plugin/plugin.json"   # must print the file
-   cd /path/to/repo-under-review
-   claude --plugin-dir "$PLUGIN"
-   ```
+```bash
+git clone https://github.com/cwijayasundara/rig-code-reviewer.git   # creates rig-code-reviewer/
+```
 
-   Check the path first: Claude Code **silently ignores a `--plugin-dir` that does not exist**, and the only symptom is that `/code-review-harness:…` commands are not found. A `git clone` creates `rig-code-reviewer/`, but a renamed or versioned folder (e.g. `rig_code_reviewer_v1.0/`) needs its own name. In the session, typing `/code-review-harness:` should list the commands; if it doesn't, the path is wrong.
+**A. Load it per session** (writes nothing to any settings file):
 
-   That session is all a review needs; `/code-review-harness:review-run` spawns its stage processes with the same plugin directory.
-2. **Or keep it on for a repo you review regularly** — install at project scope:
+```bash
+PLUGIN=/abs/path/to/rig-code-reviewer          # your clone: the folder that contains .claude-plugin/plugin.json
+ls "$PLUGIN/.claude-plugin/plugin.json"         # must print the file
+cd /path/to/repo-under-review
+claude --plugin-dir "$PLUGIN"
+```
 
-   ```bash
-   claude plugin marketplace add cwijayasundara/rig-code-reviewer --scope project
-   claude plugin install code-review-harness@rig-code-reviewer --scope project
-   ```
+- Use the flag on **every** session that runs a review command, including the one where you resume a run or check `/code-review-harness:review-status`. A session started without it reports the commands as unknown.
+- Claude Code **silently ignores a `--plugin-dir` that does not exist**: there is no error, only missing commands. Use your clone's real folder name (a renamed or versioned checkout such as `rig_code_reviewer_v1.0/` is not `rig-code-reviewer/`).
+- Check in the session: typing `/code-review-harness:` lists the commands. `/code-review-harness:review-run` starts its stage processes with the same plugin directory, so nothing else needs loading.
 
-   Never run either command without `--scope project`: their default is user scope, which loads the plugin (about 2k tokens of skill descriptions) into every session in every repo. For a local checkout, pass its path instead of `cwijayasundara/rig-code-reviewer`.
-3. **Upgrade** by pulling the plugin repo (`--plugin-dir` sessions pick it up immediately), or for a project-scope install run `claude plugin marketplace update rig-code-reviewer` and update the plugin from `/plugin`.
+**B. Enable it for one repo you review regularly** (no flag afterwards):
+
+```bash
+cd /path/to/repo-under-review
+claude plugin marketplace add cwijayasundara/rig-code-reviewer --scope project   # or the absolute path of your clone
+claude plugin install code-review-harness@rig-code-reviewer --scope project
+```
+
+- This writes `.claude/settings.json` in the reviewed repo; it is the only file the harness adds outside `.code-review/`. Commit it to share the setup, or leave it untracked.
+- Never run either command without `--scope project`: the default is user scope, which loads the plugin (about 2k tokens of skill descriptions) into every session in every repo.
+- If `marketplace add` fails with *"its source doesn't match its extraKnownMarketplaces entry"*, a marketplace named `rig-code-reviewer` is already registered in your user settings (for example from a local clone). Skip the `add` and run only the `install`, which uses that entry, or remove the entry from `~/.claude/settings.json` first.
+
+**Upgrade.** A: `git pull` in the clone; the next session uses it. B: `claude plugin marketplace update rig-code-reviewer`, then `claude plugin update code-review-harness@rig-code-reviewer --scope project`.
 
 ## Use
 
