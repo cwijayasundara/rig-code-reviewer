@@ -113,6 +113,20 @@ test("a batch that loses most of its shards stops without a retry, names the wai
   assert.match(again.out, /deep: done/);
 });
 
+test("budget: a sharded stage the budget clearly cannot finish stops before spending; a tight one warns and runs", () => {
+  // Stub stages cost $0.01; three before deep. Deep plans one compact task at the $0.45 default.
+  const src = repo();
+  const r = cli(["run", "sb", "--source", src, "--runner", STUB, "--offline", "--dimensions", "quality", "--max-usd", "0.3"]);
+  assert.equal(r.code, 4, r.out + r.err);
+  assert.match(r.err, /stopping before deep: deep needs ~\$0\.45 for 1 task\(s\) \(~\$0\.45 each\) and \$0\.27 of the \$0\.3 budget is left; nothing was spent on it/);
+  assert.match(r.err, /--max-usd 5 or more/);
+  assert.doesNotMatch(r.out, /==> deep/);
+  const src2 = repo();
+  const w = cli(["run", "sw", "--source", src2, "--runner", STUB, "--offline", "--dimensions", "quality", "--max-usd", "0.4"]);
+  assert.match(w.out, /warning: deep needs ~\$0\.45 .* the run will likely stop inside this stage/);
+  assert.match(w.out, /==> deep/);
+});
+
 test("budget: the driver stops before a stage once --max-usd is spent", () => {
   const src = repo();
   const r = cli(["run", "b", "--source", src, "--runner", STUB, "--offline", "--max-usd", "0.02"]);

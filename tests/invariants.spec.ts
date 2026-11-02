@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { COMMANDS } from "../scripts/review.ts";
 import { allowedTools, CeilingTracker, DenialTracker, denialHint, recordUsage, stageArgs, stageEnv, systemicLoss } from "../scripts/lib/run.ts";
 import { mergeTopology } from "../scripts/lib/topology.ts";
+import { usdPerAgent } from "../scripts/lib/plan.ts";
 import { validateTopology } from "../scripts/lib/architecture.ts";
 import { guardEdit } from "../scripts/lib/guard.ts";
 import { mkdtempSync } from "node:fs";
@@ -175,6 +176,19 @@ test("guard: topology.json is script-owned while a review is active", () => {
   const d = guardEdit({ tool_name: "Write", cwd: src, tool_input: { file_path: join(analysis, "topology.json") } });
   assert.ok(d && "deny" in d && /merge|review\.ts/.test(d.deny), JSON.stringify(d));
   assert.equal(guardEdit({ tool_name: "Write", cwd: src, tool_input: { file_path: join(analysis, "fragments", "api.json") } }), null);
+});
+
+test("per-shard cost is calibrated from completed shards; lost agents and wholesale-lost batches don't skew it", () => {
+  const a = mkdtempSync(join(tmpdir(), "crh-calib-"));
+  assert.equal(usdPerAgent(a, "deep"), 0.45, "no measurement: the static default");
+  recordUsage(a, "deep", { total_cost_usd: 10 }, 24, 24); // batch 1: 24 started, 24 produced
+  assert.equal(usdPerAgent(a, "deep"), 10 / 24);
+  recordUsage(a, "deep", { total_cost_usd: 5 }, 24, 0); // batch 2 lost wholesale: totalled, not calibrated
+  assert.equal(usdPerAgent(a, "deep"), 10 / 24);
+  recordUsage(a, "deep", { total_cost_usd: 6 }, 24, 12); // half lost: spend over shards produced
+  assert.equal(usdPerAgent(a, "deep"), 16 / 36);
+  const s = JSON.parse(readFileSync(join(a, "usage.json"), "utf8")).stages[0];
+  assert.deepEqual([s.total_cost_usd, s.agents, s.calib_usd, s.calib_agents], [21, 72, 16, 36]);
 });
 
 test("stage env lifts the headless wait ceiling unless the user set one", () => {

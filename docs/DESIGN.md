@@ -79,7 +79,10 @@ Script-owned files (`findings.json`, `coverage.json`, `evidence.json`,
 | report | ANALYSIS_NOTES.md + renders | REVISION fresh, renders exist |
 
 The driver computes plans itself (`review.ts plan`) before spawning deep,
-security and verify, so the cost estimate and `--max-usd` check precede spend.
+security and verify, so the cost estimate and `--max-usd` check precede spend. The
+check covers the whole stage (this batch + deferred), priced per shard actually
+produced (`calib_usd / calib_agents` in usage.json); over 1.5× the budget left, the
+stage does not start.
 `plan` shards per **review unit**: topology modules packed in path order into units of at least 1,500 SLOC (at most 4,000; a module at or above the floor, or of unknown size, stays alone), so a map that names a module per file does not multiply agents. A stage runs in batches of at most `max_agents` tasks until nothing is deferred; its gate fails while deferred work remains, unless `run --allow-deferred` accepted it (`deferred_accepted` in the plan), in which case the rest is reported as a coverage gap.
 `plan` also writes one brief per task (`briefs/<stage>/<key>.md`: scope, output
 path, JSON contract, fenced repository content) and compact workflow args

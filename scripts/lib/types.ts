@@ -117,7 +117,8 @@ export interface Plan {
   run: PlanTask[];
   skipped: string[];
   deferred: string[];
-  estimate: { agents: number; usd: number; formula: string };
+  /** usd: this batch; stage_usd: every task the stage still has to run (this batch + deferred, unless accepted). */
+  estimate: { agents: number; usd: number; formula: string; usd_per_agent: number; stage_usd: number };
   /** Set only by `run --allow-deferred`: the stage may pass with deferred work, reported as a coverage gap. */
   deferred_accepted?: boolean;
 }

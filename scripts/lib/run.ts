@@ -116,13 +116,16 @@ export class CeilingTracker {
  * a budget stop, an outage), not because a few agents were flaky; retrying it repeats
  * the failure and spends the budget. A single lost shard always gets its retry.
  */
+/** Stop before a sharded stage when its projected cost is over this multiple of the budget left (estimates are rough; below it, warn). */
+export const BUDGET_STOP_RATIO = 1.5;
+
 export function systemicLoss(lost: number, planned: number): boolean {
   return lost >= 2 && lost * 2 > planned;
 }
 
 // input_tokens is the total input processed (uncached + cache reads + cache writes);
 // the split is kept because the three are priced 1x / 0.1x / 1.25x.
-interface Usage { stage: string; input_tokens: number; output_tokens: number; total_cost_usd: number; uncached_input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; duration_ms?: number; agents?: number; models?: Record<string, number> }
+interface Usage { stage: string; input_tokens: number; output_tokens: number; total_cost_usd: number; uncached_input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; duration_ms?: number; agents?: number; calib_usd?: number; calib_agents?: number; models?: Record<string, number> }
 
 /** Per-model spend from the result event's modelUsage (covers subagents, which the top-level usage does not). */
 function modelCosts(mu: unknown): Record<string, number> | undefined {
@@ -132,7 +135,12 @@ function modelCosts(mu: unknown): Record<string, number> | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
-export function recordUsage(analysis: string, stage: string, data: Record<string, unknown>, agents?: number): number {
+/**
+ * `agents`: agents started. `completed`: shards this run actually produced; when > 0 its
+ * spend and count feed calib_* (plan.ts usdPerAgent). The driver passes 0 for a batch
+ * lost wholesale, so that spend is still totalled but never skews the per-shard cost.
+ */
+export function recordUsage(analysis: string, stage: string, data: Record<string, unknown>, agents?: number, completed?: number): number {
   const u = (data.usage ?? {}) as Record<string, number>;
   const entry: Usage = {
     stage,
@@ -146,6 +154,7 @@ export function recordUsage(analysis: string, stage: string, data: Record<string
     duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : undefined,
     ...(agents ? { agents } : {}),
   };
+  if (completed && completed > 0 && entry.total_cost_usd > 0) { entry.calib_usd = entry.total_cost_usd; entry.calib_agents = completed; }
   const prev = readJson<{ stages?: Usage[] }>(join(analysis, "usage.json"), {});
   // Retries of a stage accumulate (spend is real), keyed by stage.
   const stages = [...(prev.stages ?? [])];
@@ -158,7 +167,8 @@ export function recordUsage(analysis: string, stage: string, data: Record<string
     stages[i] = { ...s, input_tokens: s.input_tokens + entry.input_tokens, output_tokens: s.output_tokens + entry.output_tokens,
       uncached_input_tokens: add(s.uncached_input_tokens, entry.uncached_input_tokens), cache_read_input_tokens: add(s.cache_read_input_tokens, entry.cache_read_input_tokens),
       cache_creation_input_tokens: add(s.cache_creation_input_tokens, entry.cache_creation_input_tokens), models,
-      total_cost_usd: s.total_cost_usd + entry.total_cost_usd, duration_ms: (s.duration_ms ?? 0) + (entry.duration_ms ?? 0), agents: (s.agents ?? 0) + (entry.agents ?? 0) };
+      total_cost_usd: s.total_cost_usd + entry.total_cost_usd, duration_ms: (s.duration_ms ?? 0) + (entry.duration_ms ?? 0), agents: (s.agents ?? 0) + (entry.agents ?? 0),
+      ...(s.calib_agents || entry.calib_agents ? { calib_usd: add(s.calib_usd, entry.calib_usd), calib_agents: add(s.calib_agents, entry.calib_agents) } : {}) };
   } else stages.push(entry);
   const totals = {
     input_tokens: stages.reduce((n, s) => n + s.input_tokens, 0),
@@ -233,7 +243,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   const denials = new Map<Stage, DenialTracker>();
   const hint = (stage: Stage) => denialHint(stage, denials.get(stage)?.denied ?? []);
   let ceiling = new CeilingTracker(); // reset per spawn: did *this* process hit the wait ceiling?
-  const spawnStage = async (stage: Stage, agents?: number): Promise<number> => {
+  const spawnStage = async (stage: Stage, agents?: number, completed?: () => number): Promise<number> => {
     const prompt = `/code-review-harness:review-${stage} ${name}`;
     const args = ["-p", prompt];
     const pin = stageArgs(stage, loadResolved(analysis), { model: str(flags["stage-model"]), effort: str(flags["stage-effort"]), userSettings: flags["user-settings"] === true });
@@ -263,7 +273,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
     });
     await new Promise<void>((res) => (lines as unknown as { closed?: boolean }).closed ? res() : lines.once("close", () => res()));
     const d = data as Record<string, unknown> | null;
-    if (d) { const result = String(d.result ?? "").trim(); if (result) say(result); recordUsage(analysis, stage, d, agents); }
+    if (d) { const result = String(d.result ?? "").trim(); if (result) say(result); recordUsage(analysis, stage, d, agents, completed?.()); }
     return rc;
   };
 
@@ -277,6 +287,8 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   // `--allow-deferred` restores a single capped batch and accepts the rest as a gap.
   const runSharded = async (stage: ShardedStage): Promise<number | "budget"> => {
     let lastDeferred = Number.POSITIVE_INFINITY;
+    // Shards the last spawn produced, for cost calibration; 0 when the batch was lost wholesale.
+    const produced = () => { const st = buildStatus(analysis).shards.plans[stage]; return !st || systemicLoss(st.lost, st.planned) ? 0 : st.planned - st.lost; };
     for (let batch = 1; ; batch++) {
       if (stage === "verify" || stage === "consolidate") runMerge(analysis, { final: false });
       const plan = buildPlan(analysis, stage, { maxAgents, continueDeferred: true, acceptDeferred: allowDeferred });
@@ -291,11 +303,25 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
         warn(`stopping ${stage} before batch ${batch}: budget $${maxUsd} reached (spent $${spent(analysis).toFixed(2)}); ${plan.run.length + plan.deferred.length} task(s) still to run. Resume: /code-review-harness:review-run ${name} --source ${source} --max-usd <higher>`);
         return "budget";
       }
-      say(`--- ${stage} plan${batch > 1 ? ` (batch ${batch})` : ""}: ${plan.estimate.formula} · est. ~$${plan.estimate.usd}`);
+      if (batch === 1 && maxUsd !== undefined) {
+        // Whole-stage check before any of its spend: a stage passes its gate only when every
+        // task ran, so starting one the budget clearly cannot finish ends in a mid-stage stop.
+        const left = Math.max(0, maxUsd - spent(analysis)), need = plan.estimate.stage_usd;
+        const tasks = plan.run.length + (allowDeferred ? 0 : plan.deferred.length);
+        const suggest = Math.ceil((spent(analysis) + need) / 5) * 5;
+        const what = `${stage} needs ~$${need.toFixed(2)} for ${tasks} task(s) (~$${plan.estimate.usd_per_agent.toFixed(2)} each) and $${left.toFixed(2)} of the $${maxUsd} budget is left`;
+        if (need > left * BUDGET_STOP_RATIO) {
+          writeStatus(analysis);
+          warn(`stopping before ${stage}: ${what}; nothing was spent on it. Resume with --max-usd ${suggest} or more (this stage only; later stages add to it), or add --allow-deferred to run one batch of ${plan.run.length} and report the rest as a coverage gap: /code-review-harness:review-run ${name} --source ${source} --max-usd ${suggest}`);
+          return "budget";
+        }
+        if (need > left) say(`    warning: ${what}; the run will likely stop inside this stage. A cap of $${suggest} would cover it.`);
+      }
+      say(`--- ${stage} plan${batch > 1 ? ` (batch ${batch})` : ""}: ${plan.estimate.formula} · est. ~$${plan.estimate.usd}${plan.estimate.stage_usd > plan.estimate.usd ? ` (whole stage ~$${plan.estimate.stage_usd})` : ""}`);
       if (maxUsd !== undefined && spent(analysis) + plan.estimate.usd > maxUsd) say(`    warning: estimate exceeds remaining budget; --max-budget-usd will stop the stage at the cap`);
       writeArgs(analysis, scope.source, plan);
       const before = attemptsOf(analysis, stage);
-      let rc = await spawnStage(stage, plan.run.length);
+      let rc = await spawnStage(stage, plan.run.length, produced);
       if (rc === 0) {
         if (attemptsOf(analysis, stage) === before) markAttempt(analysis, stage); // unless the skill's `merge --after` did
         const st = buildStatus(analysis).shards.plans[stage];
@@ -316,7 +342,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
           const retry = buildPlan(analysis, stage, { maxAgents, acceptDeferred: allowDeferred });
           writeArgs(analysis, scope.source, retry);
           const b2 = attemptsOf(analysis, stage);
-          rc = await spawnStage(stage, retry.run.length);
+          rc = await spawnStage(stage, retry.run.length, produced);
           if (rc === 0 && attemptsOf(analysis, stage) === b2) markAttempt(analysis, stage);
         }
       }

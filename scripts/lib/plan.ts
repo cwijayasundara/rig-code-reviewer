@@ -67,10 +67,16 @@ function shardDone(analysis: string, out: string, source: string): boolean {
   return validateShard(obj, source).length === 0;
 }
 
-function calibrated(analysis: string, stage: keyof typeof USD_PER_AGENT): number {
-  const u = readJson<{ stages?: { stage: string; total_cost_usd: number; agents?: number }[] }>(join(analysis, "usage.json"), {});
-  const rec = (u.stages ?? []).find((s) => s.stage === stage && s.agents && s.total_cost_usd > 0);
-  return rec ? rec.total_cost_usd / rec.agents! : USD_PER_AGENT[stage];
+/**
+ * Cost per completed shard, from usage.json's calib_* fields: spend of stage runs that
+ * produced shards, divided by the shards they produced. Agents started but lost, and
+ * batches lost wholesale, are left out (the driver never records them), so one failed
+ * batch does not skew later estimates. No measurement yet → the static default.
+ */
+export function usdPerAgent(analysis: string, stage: keyof typeof USD_PER_AGENT): number {
+  const u = readJson<{ stages?: { stage: string; calib_usd?: number; calib_agents?: number }[] }>(join(analysis, "usage.json"), {});
+  const rec = (u.stages ?? []).find((s) => s.stage === stage);
+  return rec?.calib_agents && rec.calib_usd && rec.calib_usd > 0 ? rec.calib_usd / rec.calib_agents : USD_PER_AGENT[stage];
 }
 
 export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgents?: number; continueDeferred?: boolean; acceptDeferred?: boolean } = {}): Plan {
@@ -197,10 +203,13 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
     if (g.some((t) => prevDeferred.has(t.key)) || (used > 0 && used + todo.length > cap)) { todo.forEach((t) => deferred.push(t.key)); continue; }
     run.push(...todo); used += todo.length;
   }
-  const usd = Math.round(run.length * calibrated(analysis, stage) * 100) / 100;
+  const per = usdPerAgent(analysis, stage);
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const usd = round(run.length * per);
+  const stageUsd = round((run.length + (opts.acceptDeferred ? 0 : deferred.length)) * per);
   const plan: Plan & { attempts: number } = {
     stage, run, skipped, deferred,
-    estimate: { agents: run.length, usd, formula: `${formula}; running ${run.length}, skipped ${skipped.length} (done), deferred ${deferred.length} (cap ${cap})` },
+    estimate: { agents: run.length, usd, usd_per_agent: round(per), stage_usd: stageUsd, formula: `${formula}; running ${run.length}, skipped ${skipped.length} (done), deferred ${deferred.length} (cap ${cap})` },
     // attempts counts real stage executions (markAttempt), never plan rebuilds.
     attempts: (prev as (Plan & { attempts?: number }) | null)?.attempts ?? 0,
     ...(opts.acceptDeferred && deferred.length ? { deferred_accepted: true } : {}),

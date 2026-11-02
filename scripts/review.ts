@@ -166,7 +166,7 @@ export const COMMANDS: Record<string, Cmd> = {
       const args = writeBriefs(analysis, scope.source, plan);
       writeJson(join(analysis, "plan", `${stage}.workflow-args.json`), args);
       if (flags.json === true) console.log(JSON.stringify(args));
-      else console.log(`${stage}: ${plan.estimate.formula} · est. ~$${plan.estimate.usd} · workflow args: ${join(analysis, "plan", `${stage}.workflow-args.json`)}`);
+      else console.log(`${stage}: ${plan.estimate.formula} · est. ~$${plan.estimate.usd}${plan.estimate.stage_usd > plan.estimate.usd ? ` (whole stage ~$${plan.estimate.stage_usd})` : ""} · workflow args: ${join(analysis, "plan", `${stage}.workflow-args.json`)}`);
       return 0;
     },
   },
