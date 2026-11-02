@@ -1,9 +1,21 @@
 {
-  "note": "Gate thresholds per case. A case with no entry is reported as 'not enforced', never silently passed. Tighten, never loosen without a recorded reason.",
+  "note": "Gate thresholds per case. A case with no entry is reported as 'not enforced', never silently passed. Tighten, never loosen without a recorded reason. maxUsd is ~1.6x the measured cost to absorb run-to-run variance.",
   "cases": {
+    "clean-control": {
+      "maxFalsePositives": 0, "maxColocated": 1, "maxUsd": 1.25,
+      "source": "live run 2026-11-02 (compact mode + pinned stages): 0 confirmed, $0.78; upstream code-modernization $1.85"
+    },
+    "js-traversal": {
+      "minRecall": 1, "maxFalsePositives": 0, "maxDuplicatesOfMust": 0, "maxColocated": 6, "maxUsd": 3.25,
+      "source": "live run 2026-11-02: recall 1, FP 0, 7 confirmed, co-located 4, $2.00; upstream $2.75"
+    },
+    "py-quality": {
+      "minRecall": 1, "maxFalsePositives": 0, "maxDuplicatesOfMust": 0, "maxColocated": 5, "maxUsd": 2,
+      "source": "live run 2026-11-02: recall 1, FP 0, 5 confirmed, co-located 3, $1.22; upstream $2.09"
+    },
     "py-sqli": {
-      "minRecall": 1, "maxFalsePositives": 0, "maxDuplicatesOfMust": 0, "maxColocated": 7, "maxUsd": 9,
-      "source": "live runs 2026-10-31: before consolidation recall 1, FP 0, 14 confirmed, co-located 12, $6.67; with consolidation recall 1, FP 0, 10 confirmed, co-located 7, $6.08"
+      "minRecall": 1, "maxFalsePositives": 0, "maxDuplicatesOfMust": 0, "maxColocated": 7, "maxUsd": 3,
+      "source": "live runs 2026-10-31: before consolidation recall 1, FP 0, 14 confirmed, co-located 12, $6.67; with consolidation recall 1, FP 0, 10 confirmed, co-located 7, $6.08. 2026-11-02: verify batching + pinned stages $3.27 (co-located 8); + compact mode recall 1, FP 0, 8 confirmed, co-located 6, $1.83 (maxUsd 9 -> 3); upstream $3.04"
     }
   }
 }
