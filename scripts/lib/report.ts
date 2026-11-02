@@ -7,6 +7,7 @@ import { analysisMd, roadmapMd } from "./report-md.ts";
 import { architectureMd, diagrams } from "./report-arch.ts";
 import { reportHtml } from "./report-html.ts";
 import { writeText } from "./util.ts";
+import { topologyData, topologyHtml } from "./topology-html.ts";
 
 export { loadCtx, rank } from "./report-ctx.ts";
 
@@ -25,6 +26,7 @@ export function renderAll(analysis: string, opts: { pluginVersion?: string } = {
     ["REPORT.html", reportHtml(c)],
   ];
   const d = diagrams(c);
+  if (c.topology) out.push(["TOPOLOGY.html", topologyHtml(topologyData(c.topology, { name: c.scope?.name ?? "system", findings: c.findings, architecture: c.architecture }))]);
   if (d) out.push(["diagrams/context.mmd", d.context], ["diagrams/modules.mmd", d.modules], ["diagrams/data-lineage.mmd", d.lineage]);
   let redactions = 0;
   const written: string[] = [];

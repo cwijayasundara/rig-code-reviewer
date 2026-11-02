@@ -8,6 +8,11 @@
 - The per-unit compact threshold (`COMPACT_LOC`) now applies to the security stage only.
 - Shard keys still name every dimension they cover, so a lost shard still marks each of them "not fully covered".
 
+**Added — interactive `TOPOLOGY.html`**
+- `merge-topology` now also writes `TOPOLOGY.html`: the topology as one self-contained page (no CDN, works offline): a force-laid-out module graph you can pan, zoom and drag, edges coloured by type with per-type filters, search, and a side panel per module (path, kind, size, entry points, dependencies and dependants with `file:line` evidence). Key flows highlight their modules and edges; data stores and external systems an edge points at get their own nodes.
+- `render` rewrites it with verified findings (refuted and accepted left out): a severity ring per module, the worst findings in its panel, and its architecture disposition. `REPORT.html` links to it. The report diagrams stay as they were; unlike them, the page draws every edge.
+- Repository text enters the page only as JSON (`<` escaped) and the script builds the DOM with `textContent`, so a module name or description cannot inject markup. The file is script-owned: the guard denies agent writes.
+
 **Changed — the same rule for every other fan-out**
 - Security: one whole-system threat model (`threat/system.md`, mapping trust handed across modules) instead of one per unit, and one all-category auditor per unit instead of one per unit × category. `--effort high` restores one auditor per category on units of 1,000+ lines and the cross-boundary sweep. A 20-unit repo goes from ~103 security agents to ~21–23.
 - Map: `suggest-modules` now also prints `units` (candidates packed into 8,000–25,000-line map units); the map skill starts one analyst per unit, never per module. A small repo gets one analyst.

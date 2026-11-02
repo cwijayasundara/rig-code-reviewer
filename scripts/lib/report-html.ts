@@ -78,6 +78,7 @@ ${banners.map((b) => `<div class="banner" role="alert">${esc(b)}</div>`).join("\
 <section class="tiles">
 ${tile("files", ev.total_files ?? "?")}${tile("code lines", ev.total_code_lines ?? "?")}${tile("confirmed", k.confirmed)}${tile("needs human", k.needs_human)}${tile("accepted risk", k.accepted)}${tile("refuted", k.refuted)}${tile("deferred", k.deferred)}
 </section>
+${c.topology ? `<p><a href="TOPOLOGY.html">Open the interactive system topology</a> — modules, dependencies, flows and findings per module.</p>` : ""}
 ${c.architecture ? `<h2>Architecture</h2><p><b>Style:</b> ${esc(c.architecture.style)}</p><p>${esc(c.architecture.summary)}</p>${qa ? `<div class="wrap"><table><thead><tr><th>Quality attribute</th><th>Rating</th><th>Rationale</th></tr></thead><tbody>${qa}</tbody></table></div>` : ""}` : `<h2>Architecture</h2><p class="muted">Architecture stage not run.</p>`}
 ${diag}
 <h2>Findings</h2>

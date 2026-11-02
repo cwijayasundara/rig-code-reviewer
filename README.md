@@ -71,13 +71,13 @@ One fresh headless Claude process per stage (context isolation by construction),
 | scope | `scope.json`, review dir `<source>/.code-review/<name>/` (git-ignored) | script |
 | preflight | stack, scope boundary, missing source, execution status → `PREFLIGHT.md` | model |
 | assess | inventory, SLOC, complexity, churn × complexity hotspots, ownership/bus factor, scanner packs → `evidence.json`; tree fingerprint → `REVISION.json`; analyst `ASSESSMENT.md` | script + model |
-| map | modules (oversized dirs auto-split), typed edges, entry points, data stores, flows; one analyst per packed map unit → `fragments/*` → `topology.json` (validated) | model |
+| map | modules (oversized dirs auto-split), typed edges, entry points, data stores, flows; one analyst per packed map unit → `fragments/*` → `topology.json` (validated) and an interactive `TOPOLOGY.html` | model |
 | deep | one specialist per whole-system dimension (architecture, dependencies, operability, data → `raw/deep/<dim>--system.json`) plus one code-local reviewer per review unit for quality, performance and testing (small modules packed into units of ≥1,500 SLOC), from a script-computed plan → `raw/deep/*` | agents |
 | security | one whole-system threat model (`threat/system.md`), one all-category auditor per review unit (one per category on units ≥1,000 lines at `--effort high`), gap-fill sweeps for files outside every module (plus a cross-boundary sweep at high effort) → `raw/security/*` | agents |
 | consolidate | duplicates across dimensions removed: script groups co-located findings, one consolidator per review unit decides (up to 8 groups each) which share one root cause, script validates and merges → `consolidate/*` | agents + script |
 | verify | merge (dedupe, fingerprint, stable ids) → independent verifier per finding, batched up to 5 per review unit; security: REACHABILITY / IMPACT / DEFENSES panel, one agent per lens → `votes/*` → verdicts computed | agents + script |
 | architecture | one critic builds on deep's whole-system findings: ISO 25010 scorecard (evidence or "unavailable"), reconstructed ADRs, per-module dispositions → `architecture.json` (validated) | model |
-| report | analyst notes, then deterministic `ANALYSIS_REPORT.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `REPORT.html`, `findings.sarif`, `findings.jsonl` | script |
+| report | analyst notes, then deterministic `ANALYSIS_REPORT.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `REPORT.html`, `TOPOLOGY.html` (the map again, with verified findings and dispositions per module), `findings.sarif`, `findings.jsonl` | script |
 | deck | `DECK.pptx`: the whole analysis as an editable Google Slides deck with native diagrams (built automatically after report; `/code-review-harness:review-deck <name>` rebuilds it) | script |
 
 ## Why trust the output

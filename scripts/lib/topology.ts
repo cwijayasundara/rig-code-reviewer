@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { EDGE_TYPES, validateTopology } from "./architecture.ts";
 import { moduleLines } from "./modules.ts";
 import { readJson, writeJson } from "./util.ts";
+import { topologyData, writeTopologyHtml } from "./topology-html.ts";
+import { loadScope } from "./paths.ts";
 
 type Obj = Record<string, any>;
 const CITE = /\S+:\d+/;
@@ -88,6 +90,9 @@ export function mergeTopology(analysis: string): TopologyMerge {
   const sloc = readJson<{ file_sloc?: Record<string, number> }>(join(analysis, "evidence.json"), {}).file_sloc;
   const { topology, stats } = mergeFragments(frags, sloc);
   const errors = names.length ? validateTopology(topology) : [`no fragments in ${dir} — each codebase-analyst writes fragments/<module>.json`];
-  if (!errors.length) writeJson(join(analysis, "topology.json"), topology);
+  if (!errors.length) {
+    writeJson(join(analysis, "topology.json"), topology);
+    writeTopologyHtml(analysis, topologyData(topology, { name: loadScope(analysis)?.name ?? "system" }));
+  }
   return { fragments: frags.length, invalid_fragments: invalid, ...stats, errors, written: !errors.length };
 }

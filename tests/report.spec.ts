@@ -168,7 +168,7 @@ test("full inputs render architecture sections, diagrams, security panel and bas
     "scanners/status.json": [{ id: "gitleaks", tool: "gitleaks", status: "ok", version: "8.30.1", findings: 0, network: false }],
   });
   const r = renderAll(d);
-  assert.equal(r.written.length, 7);
+  assert.equal(r.written.length, 8, "4 reports + TOPOLOGY.html + 3 diagrams");
   const md = read(d, "ARCHITECTURE.md");
   assert.match(md, /modular monolith/);
   assert.match(md, /```mermaid\ngraph LR/);
