@@ -10,7 +10,7 @@
       "name": "code-review-harness",
       "source": "./",
       "description": "Read-only whole-codebase architecture + code + security evaluation with adversarial verification and deterministic reports.",
-      "version": "2.0.0"
+      "version": "2.1.0"
     }
   ]
 }

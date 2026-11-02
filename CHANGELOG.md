@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.0
 
 **Fixed — long sharded batches lost most of their shards, then the retry spent the budget again**
 - A live review on a 103-task repo stopped at its $25 cap with no report: deep batch 2 lost 23 of 24 shards, the one blind retry was cut off by the budget, and about $12 produced nothing. `claude -p` stops background work still running when its wait ceiling passes (10 minutes by default), and each sharded stage runs its agents as a background workflow.

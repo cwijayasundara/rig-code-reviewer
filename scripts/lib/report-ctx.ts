@@ -42,7 +42,7 @@ function obj(p: string): Obj | null {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : null;
 }
 
-export function loadCtx(analysis: string, pluginVersion = "2.0.0"): Ctx {
+export function loadCtx(analysis: string, pluginVersion = "2.1.0"): Ctx {
   const fj = readJson<unknown>(join(analysis, "findings.json"), null);
   const list: Finding[] = Array.isArray(fj) ? fj : Array.isArray((fj as Obj | null)?.findings) ? (fj as Obj).findings : [];
   const findings = list.filter((f) => f && typeof f === "object").slice().sort(rank);
