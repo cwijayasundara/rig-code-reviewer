@@ -26,7 +26,7 @@ export function readText(p: string): string | null {
 }
 
 /** Atomic write: a reader (dashboard, hook) never sees a half-written file. */
-export function writeText(p: string, s: string): void {
+export function writeText(p: string, s: string | Uint8Array): void {
   mkdirSync(dirname(p), { recursive: true });
   const tmp = `${p}.tmp-${process.pid}`;
   writeFileSync(tmp, s);

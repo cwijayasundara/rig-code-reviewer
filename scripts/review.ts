@@ -2,7 +2,7 @@
 // code-review-harness CLI. Models advise, scripts decide: every count,
 // verdict, plan, render and gate lives behind one command table.
 //   node scripts/review.ts <command> [args]     (Node >= 22.18, zero deps)
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeBriefs } from "./lib/briefs.ts";
@@ -14,6 +14,7 @@ import { runMerge } from "./lib/merge.ts";
 import { activate, artefactExcludes, deactivate, ensureReviewRoot, loadScope, locate, resolvePaths } from "./lib/paths.ts";
 import { buildPlan, markAttempt } from "./lib/plan.ts";
 import { renderAll } from "./lib/report.ts";
+import { renderDeck } from "./lib/report-deck.ts";
 import { checkFresh, finaliseRevision, stampRevision } from "./lib/revision.ts";
 import { runScanners } from "./lib/scanners.ts";
 import { writeStatus } from "./lib/status.ts";
@@ -209,6 +210,29 @@ export const COMMANDS: Record<string, Cmd> = {
       writeStatus(analysis);
       console.log(`rendered: ${r.written.map((w) => w.slice(analysis.length + 1)).join(", ")} · sarif ${x.sarif} result(s) · redactions ${r.redactions}`);
       console.log(`open: ${join(analysis, "ANALYSIS_REPORT.md")} · ${join(analysis, "ARCHITECTURE.md")} · ${join(analysis, "REPORT.html")}`);
+      return 0;
+    },
+  },
+  deck: {
+    usage: "deck <name> [--allow-stale] [--draft]   (DECK.pptx: the full analysis as a Google-Slides-friendly deck, from the rendered report's inputs)",
+    run: (pos, flags) => {
+      const { analysis, scope } = scopeOrDie(pos[0]);
+      // The deck is a view of the final report: it needs a current render, built from the same
+      // verified findings, so its numbers reconcile with ANALYSIS_REPORT.md.
+      const mtime = (f: string) => { try { return statSync(join(analysis, f)).mtimeMs; } catch { return -1; } };
+      const current = mtime("ANALYSIS_REPORT.md") >= 0 && mtime("ANALYSIS_REPORT.md") >= mtime("findings.json");
+      if (!current && flags.draft !== true) {
+        console.error(`refusing to build the deck: ANALYSIS_REPORT.md is missing or older than findings.json — run /code-review-harness:review-report ${scope.name} first (or --draft)`);
+        return 1;
+      }
+      const fresh = checkFresh(analysis, scope.source);
+      if (!fresh.fresh && flags["allow-stale"] !== true) {
+        console.error(`refusing to build the deck: the source tree changed since assess (${fresh.hint}). Re-run assess, or pass --allow-stale for a STALE-marked deck.`);
+        return 1;
+      }
+      const r = renderDeck(analysis, { pluginVersion: VERSION });
+      console.log(`deck: ${r.slides} slide(s) · redactions ${r.redactions}`);
+      console.log(`open: ${r.path}  (Google Slides: Drive → New → File upload, then Open with Google Slides; or Slides → File → Import slides)`);
       return 0;
     },
   },

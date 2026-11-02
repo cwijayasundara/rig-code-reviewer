@@ -30,7 +30,7 @@ test("active: writes allowed only inside the review dir, resolved absolutely (ol
 
 test("active: script-owned and human-owned files cannot be written by the model", () => {
   const { src, a } = active();
-  for (const f of ["findings.json", "coverage.json", "evidence.json", "REVISION.json", "ANALYSIS_REPORT.md", "REPORT.html", "plan/deep.json", "raw/scanner/gitleaks.json", "scope.json"]) {
+  for (const f of ["findings.json", "coverage.json", "evidence.json", "REVISION.json", "ANALYSIS_REPORT.md", "REPORT.html", "DECK.pptx", "plan/deep.json", "raw/scanner/gitleaks.json", "scope.json"]) {
     assert.ok(edit(src, join(a, f)), `${f} should be denied`);
   }
   assert.ok(edit(src, join(src, ".code-review", "accepted-risk.json")));

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Added — the review as a Google Slides deck**
+- New `review.ts deck <name>` and `/code-review-harness:review-deck <name>` write `DECK.pptx` beside the report: title, executive summary, findings-at-a-glance (dimension × severity), top risks, analyst notes, scope and methodology, scanners, coverage and gaps, architecture (summary, modules, entry points, externals, flows, ISO 25010 ratings, reconstructed decisions, dispositions, risks), threat model, security findings, quality signals, hotspots, ownership, test posture, dependencies, one slide per confirmed finding (with verifier corrections), the Now/Next/Later roadmap, open questions, accepted risks, baseline diff, assessment, and the refuted/deferred appendix.
+- Built from the same loaded context as `ANALYSIS_REPORT.md`, so every number reconciles; refuses until the report is current, and on a changed tree unless `--allow-stale` (every footer then says STALE). Redacted like every other render; deterministic bytes; `DECK.pptx` is script-owned in the guard.
+- Diagrams, all drawn as native shapes and connectors so they stay editable after import (Google Slides flattens imported charts into pictures): executive dashboard (KPI tiles, severity bars, the one change that matters), dimension × severity heatmap, review pipeline and three-lens verification flow, coverage bars, system context (entry points → system → externals and data stores), layered module dependency graph coloured by disposition, ISO 25010 rating meters, hotspot bars, security posture by weakness category, Now/Next/Later roadmap lanes, a severity × effort priority matrix with quick wins, and a next-steps slide.
+- Design: navy title and numbered section dividers, an agenda with slide numbers, a section label above every title, navy table headers with severity-coloured cells, one card-layout slide per finding (severity pill, meta chips, evidence and impact beside the fix), and short text slides set in larger type.
+- Google Slides import: plain OOXML, one blank layout, Arial only, editable text boxes, shapes, connectors and tables, and pagination by estimated text height because Slides ignores autofit. No new dependencies (a small deflate ZIP writer on `node:zlib`).
+- `/review-run` builds the deck after the report stage ($0); a deck failure warns and never fails the run.
+
 **Fixed — a confirmed finding shipped with text its verifier proved wrong**
 - A verifier that confirmed a finding but found factual errors in it could only say so in its free-text note, which no report shows beside the finding. A live `js-traversal` review published "assert 400 for an array-valued param" as the recommendation after the verifier had shown the code accepts that input, so the recommended test would fail.
 - Every vote now carries `corrections` (`[]` when accurate): field, the wrong claim quoted, what is true. Validated on write; a vote without it is rejected.

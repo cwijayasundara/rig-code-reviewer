@@ -54,6 +54,7 @@ plugin (see NOTICE.md) and the conventions of the `rig` SDLC harness.
     ANALYSIS_NOTES.md             # model prose
     ANALYSIS_REPORT.md ARCHITECTURE.md ROADMAP.md REPORT.html  # script renders
     findings.sarif findings.jsonl diagrams/*.mmd DIFF.md       # script renders
+    DECK.pptx                     # script (`review.ts deck`): the report as a Google-Slides-friendly deck
     REVISION.json                 # script: tree fingerprint at assess; report refuses if stale
     status.json usage.json        # script
 ```
@@ -87,6 +88,20 @@ per task (threat models first); each agent writes its own output file, which the
 PostToolUse hook validates. Missing outputs are lost shards: retried once by the
 driver, then reported as coverage gaps. Shards older than `REVISION.json` are
 stale and re-run. `--from <stage>` forces that stage and the rest to re-run.
+
+After the report gate passes, the driver runs `review.ts deck` ($0, not a stage:
+no gate depends on it). The deck is built from the same `loadCtx` as
+`ANALYSIS_REPORT.md`, so its numbers reconcile; it refuses while the report is
+missing or older than `findings.json`, and on a changed tree unless
+`--allow-stale` (then every footer says STALE). `scripts/lib/pptx.ts` writes
+plain OOXML for Google Slides import: one blank layout, Arial only, real text
+boxes, shapes, connectors and tables, and content paginated against the body box
+(`report-deck.ts`) because Google Slides ignores autofit. Diagrams
+(`deck-diagrams.ts`) are native shapes, never images or embedded charts, which
+Slides would flatten: dashboard, heatmap, pipeline, coverage, system context,
+layered module graph (longest-path layers, top 16 modules by degree), quality
+meters, hotspots, security posture, roadmap lanes and priority matrix. Long tables repeat their header on each
+page; every confirmed finding gets its own slide.
 
 ## Finding contract (raw → merged)
 

@@ -20,7 +20,7 @@ test("driver runs every stage, retries a lost shard, renders reconciled reports,
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(r.out, /lost; retrying once/);
   const a = join(src, ".code-review", "e2e");
-  for (const f of ["ANALYSIS_REPORT.md", "ARCHITECTURE.md", "ROADMAP.md", "REPORT.html", "findings.sarif", "findings.jsonl", "REVISION.json", "THREAT_MODEL.md", "coverage.json"]) {
+  for (const f of ["ANALYSIS_REPORT.md", "ARCHITECTURE.md", "ROADMAP.md", "REPORT.html", "DECK.pptx", "findings.sarif", "findings.jsonl", "REVISION.json", "THREAT_MODEL.md", "coverage.json"]) {
     assert.ok(existsSync(join(a, f)), `missing ${f}`);
   }
   const findings = JSON.parse(readFileSync(join(a, "findings.json"), "utf8")).findings as { dimension: string; verdict: string; reporters: number; severity: string }[];

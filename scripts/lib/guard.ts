@@ -17,7 +17,7 @@ export type Decision = { deny: string } | { block: string } | null;
 /** Files only scripts may write (relative to the analysis dir). Matched case-insensitively (APFS/NTFS). */
 const SCRIPT_OWNED = [
   /^(findings|coverage|evidence|status|usage|scope|diff)\.json$/i, /^revision\.json$/i, /^threat_model\.md$/i,
-  /^(analysis_report|architecture|roadmap|review_scope)\.md$/i, /^report\.html$/i, /^findings\.(sarif|jsonl)$/i,
+  /^(analysis_report|architecture|roadmap|review_scope)\.md$/i, /^report\.html$/i, /^deck\.pptx$/i, /^findings\.(sarif|jsonl)$/i,
   /^plan\//i, /^briefs\//i, /^scanners\//i, /^raw\/scanner\//i, /^diagrams\//i,
 ];
 const ROOT_OWNED = /^(accepted-risk\.json|active\.json|\.gitignore)$/i;

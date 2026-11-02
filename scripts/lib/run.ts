@@ -228,8 +228,11 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   } finally {
     if (!dry) deactivate(source);
   }
+  // The deck is a deterministic view of the rendered report ($0): build it whenever the
+  // report is current. A failure is reported, never fatal — the report already stands.
+  if (!dry && gate(analysis, "report") && cli(pluginRoot, ["deck", name], source, log) !== 0) warn(`warning: DECK.pptx not built; retry with /code-review-harness:review-deck ${name}`);
   const s = writeStatus(analysis);
   say(`usage: ${s.usage.totals.input_tokens} in / ${s.usage.totals.output_tokens} out tokens · $${Number(s.usage.totals.total_cost_usd).toFixed(4)}`);
-  say(`open: ${join(analysis, "ANALYSIS_REPORT.md")} · ${join(analysis, "ARCHITECTURE.md")} · ${join(analysis, "REPORT.html")}`);
+  say(`open: ${join(analysis, "ANALYSIS_REPORT.md")} · ${join(analysis, "ARCHITECTURE.md")} · ${join(analysis, "REPORT.html")}${exists(join(analysis, "DECK.pptx")) ? ` · ${join(analysis, "DECK.pptx")}` : ""}`);
   return loadScope(analysis) ? 0 : 1;
 }

@@ -52,6 +52,7 @@ One fresh headless Claude process per stage (context isolation by construction),
 | verify | merge (dedupe, fingerprint, stable ids) → independent verifier per finding; security: REACHABILITY / IMPACT / DEFENSES panel → `votes/*` → verdicts computed | agents + script |
 | architecture | ISO 25010 scorecard (evidence or "unavailable"), reconstructed ADRs, per-module dispositions → `architecture.json` (validated) | model |
 | report | analyst notes, then deterministic `ANALYSIS_REPORT.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `REPORT.html`, `findings.sarif`, `findings.jsonl` | script |
+| deck | `DECK.pptx`: the whole analysis as an editable Google Slides deck with native diagrams (built automatically after report; `/code-review-harness:review-deck <name>` rebuilds it) | script |
 
 ## Why trust the output
 
@@ -84,4 +85,4 @@ npm run eval:upstream -- --live --max-usd 6 --upstream <path>/plugins/code-moder
 npm run eval:compare # $0: parity gate — the harness must catch what upstream caught, with no more false positives
 ```
 
-Layout: `scripts/review.ts` (one CLI, command table) · `scripts/lib/*` · `skills/*` (thin prompts) · `agents/*` · `workflows/review-tasks.js` · `hooks/` (guards + status Mod) · `data/stacks/*.json` (scanner packs as data) · `data/cwe-categories.json` · `schemas/` · `eval/` · `tests/`. Design: [docs/DESIGN.md](docs/DESIGN.md).
+Layout: `scripts/review.ts` (one CLI, command table) · `scripts/lib/*` (`report-deck.ts` + `deck-diagrams.ts` + `pptx.ts` + `zip.ts`: the dependency-free deck writer) · `skills/*` (thin prompts) · `agents/*` · `workflows/review-tasks.js` · `hooks/` (guards + status Mod) · `data/stacks/*.json` (scanner packs as data) · `data/cwe-categories.json` · `schemas/` · `eval/` · `tests/`. Design: [docs/DESIGN.md](docs/DESIGN.md).
