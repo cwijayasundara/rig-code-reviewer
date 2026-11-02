@@ -15,7 +15,7 @@ const name = m?.[2] ?? "";
 const A = process.env.CODE_REVIEW_OUT!;
 const CLI = join(resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."), "scripts", "review.ts");
 const put = (rel: string, v: unknown) => { mkdirSync(dirname(join(A, rel)), { recursive: true }); writeFileSync(join(A, rel), typeof v === "string" ? v : JSON.stringify(v, null, 2)); };
-const args = (s: string) => JSON.parse(readFileSync(join(A, "plan", `${s}.workflow-args.json`), "utf8")) as { tasks: [string, string][] };
+const args = (s: string) => JSON.parse(readFileSync(join(A, "plan", `${s}.workflow-args.json`), "utf8")) as { tasks: [string, string, (string | null)?, (string | null)?][] };
 
 const sqli = { dimension: "security", severity: "High", confidence: "high", file: "src/app.py", line: 4, title: "SQL injection in run()", evidence: "src/app.py:4 concatenates q into SQL", impact: "read any row", recommendation: "parameterise the query", effort: "S", cwe: "CWE-89", exploit_scenario: "external caller passes q=\"1 OR 1=1\"" };
 const swallow = { dimension: "quality", severity: "Medium", confidence: "high", file: "src/app.py", line: 5, title: "Exception swallowed", evidence: "src/app.py:5-6 except Exception: pass", impact: "failures vanish", recommendation: "log and re-raise", effort: "S" };
@@ -28,14 +28,14 @@ switch (stage) {
     const marker = join(A, ".stub-lost");
     args("deep").tasks.forEach(([key], i) => {
       if (i === 0 && process.env.STUB_LOSE_ONCE === "1" && !existsSync(marker)) { writeFileSync(marker, "1"); return; }
-      put(`raw/deep/${key}.json`, { shard: key, filesRead: ["src/app.py"], notReached: [], findings: key.startsWith("quality--") ? [swallow] : [] });
+      put(`raw/deep/${key}.json`, { shard: key, filesRead: ["src/app.py"], notReached: [], findings: /^(quality|[a-z+]*\+quality)(\+|--)/.test(key) ? [swallow] : [] });
     });
     break;
   }
   case "security":
     for (const [key, agent] of args("security").tasks) {
       if (agent === "threat-modeler") put(`threat/${key.replace(/^threat--/, "")}.md`, "Entry: src/app.py:2 (external caller).");
-      else put(`raw/security/${key}.json`, { shard: key, filesRead: ["src/app.py"], notReached: [], findings: key.includes("injection") ? [sqli] : [] });
+      else put(`raw/security/${key}.json`, { shard: key, filesRead: ["src/app.py"], notReached: [], findings: /injection|all-categories/.test(key) ? [sqli] : [] });
     }
     break;
   case "consolidate": {
@@ -44,12 +44,16 @@ switch (stage) {
     for (const t of plan.run) put(`consolidate/${t.key}.json`, { group: t.key, merges: [] });
     break;
   }
-  case "verify":
+  case "verify": {
+    // A verify task judges a batch of findings (same file, one lens) and writes one vote each.
+    const plan = JSON.parse(readFileSync(join(A, "plan", "verify.json"), "utf8")) as { run: { key: string; input: { ids: string[]; lens: string } }[] };
+    const byKey = new Map(plan.run.map((t) => [t.key, t.input]));
     for (const [key] of args("verify").tasks) {
-      const [id, lens] = key.split("--");
-      put(`votes/${key}.json`, { id, lens, verdict: "confirmed", note: "re-derived from src/app.py:4", evidence: "src/app.py:4", corrections: [] });
+      const t = byKey.get(key)!;
+      for (const id of t.ids) put(`votes/${id}--${t.lens}.json`, { id, lens: t.lens, verdict: "confirmed", note: "re-derived from src/app.py:4", evidence: "src/app.py:4", corrections: [] });
     }
     break;
+  }
   case "architecture":
     put("architecture.json", { summary: "Single-module script.", style: "procedural", quality_attributes: [{ name: "security", rating: 2, rationale: "SQLi", evidence: ["src/app.py:4"] }, { name: "usability", rating: "unavailable", rationale: "no UI", evidence: [] }], decisions: [], dispositions: [{ module: "core", disposition: "refactor", rationale: "fix SQL", evidence: ["src/app.py:4"] }], risks: [], one_thing: "Parameterise queries." });
     break;

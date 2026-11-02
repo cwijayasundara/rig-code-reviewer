@@ -5,7 +5,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import { validateArchitecture, validateTopology } from "./architecture.ts";
 import { loadScope } from "./paths.ts";
-import { STAGES, type Finding, type Plan, type Stage } from "./types.ts";
+import { STAGES, taskOuts, type Finding, type Plan, type Stage } from "./types.ts";
 import { exists, readJson, writeJson } from "./util.ts";
 
 const OVERSIZED_LOC = 5000;
@@ -15,7 +15,7 @@ function mtime(p: string): number { try { return statSync(p).mtimeMs; } catch { 
 function planState(analysis: string, stage: string) {
   const plan = readJson<(Plan & { attempts?: number }) | null>(join(analysis, "plan", `${stage}.json`), null);
   if (!plan) return null;
-  const lost = plan.run.filter((t) => !exists(join(analysis, t.out))).map((t) => t.key);
+  const lost = plan.run.filter((t) => taskOuts(t).some((o) => !exists(join(analysis, o)))).map((t) => t.key);
   return { planned: plan.run.length, lost, deferred: plan.deferred, deferred_accepted: plan.deferred_accepted === true, skipped: plan.skipped.length, attempts: plan.attempts ?? 0, estimate: plan.estimate };
 }
 

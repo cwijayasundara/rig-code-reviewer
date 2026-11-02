@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { COMMANDS } from "../scripts/review.ts";
-import { allowedTools } from "../scripts/lib/run.ts";
+import { allowedTools, recordUsage, stageArgs } from "../scripts/lib/run.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { AGENT } from "../scripts/lib/plan.ts";
 import { hasSecret, redact } from "../scripts/lib/redact.ts";
 import { FAKE_AWS_KEY, ROOT } from "./testkit.ts";
@@ -71,6 +73,32 @@ test("human-only skill cannot be model-invoked; headless allowlist never permits
   const tools = allowedTools("/plugin").join(" ");
   assert.doesNotMatch(tools, /REVIEW_HUMAN|git commit|git push|npm install|rm:|Bash\(\*\)/);
   assert.match(tools, /Bash\(node --disable-warning=ExperimentalWarning \/plugin\/scripts\/review\.ts:\*\)/);
+});
+
+test("every headless stage pins its model and effort, drops user MCP/plugins, and never uses --bare (it would skip the guard hooks)", () => {
+  for (const stage of ["preflight", "assess", "map", "deep", "security", "consolidate", "verify", "architecture", "report"] as const) {
+    const a = stageArgs(stage, {});
+    assert.match(a[a.indexOf("--model") + 1]!, /^[a-z]/, `${stage} has a pinned model`);
+    assert.match(a[a.indexOf("--effort") + 1]!, /^(low|medium|high|xhigh|max)$/);
+    assert.ok(a.includes("--strict-mcp-config"));
+    assert.deepEqual(a.slice(a.indexOf("--setting-sources"), a.indexOf("--setting-sources") + 2), ["--setting-sources", "project,local"]);
+    assert.ok(!a.includes("--bare"));
+  }
+  assert.deepEqual(stageArgs("architecture", {}).slice(0, 4), ["--model", "sonnet", "--effort", "medium"]);
+  const o = stageArgs("verify", {}, { model: "opus", effort: "high", userSettings: true });
+  assert.deepEqual(o.slice(0, 4), ["--model", "opus", "--effort", "high"]);
+  assert.ok(!o.includes("--setting-sources"));
+});
+
+test("usage keeps uncached / cache-read / cache-write input apart and per-model spend, accumulated across retries", () => {
+  const a = mkdtempSync(join(tmpdir(), "crh-usage-"));
+  const ev = { usage: { input_tokens: 10, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200, output_tokens: 5 }, total_cost_usd: 0.5, modelUsage: { "claude-sonnet-5-5": { costUSD: 0.1 }, "claude-opus-5-5": { costUSD: 0.4 } } };
+  recordUsage(a, "verify", ev, 3);
+  recordUsage(a, "verify", ev, 1);
+  const s = JSON.parse(readFileSync(join(a, "usage.json"), "utf8")).stages[0];
+  assert.equal(s.input_tokens, 2420);
+  assert.deepEqual([s.uncached_input_tokens, s.cache_read_input_tokens, s.cache_creation_input_tokens, s.agents], [20, 2000, 400, 4]);
+  assert.deepEqual(s.models, { "claude-sonnet-5-5": 0.2, "claude-opus-5-5": 0.8 });
 });
 
 test("hooks.json: every hook command is a real CLI hook mode", () => {

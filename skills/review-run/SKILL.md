@@ -1,7 +1,7 @@
 ---
 name: review-run
 description: Run the whole code review automatically — one fresh headless Claude process per stage, deterministic plans/merge/render in between, resumable, budget-capped. Use when the user wants the full evaluation without driving each stage.
-argument-hint: <name> --source <path> [--max-usd N] [--max-agents N] [--allow-deferred] [--from stage | --only stage] [--offline] [--dry-run]
+argument-hint: <name> --source <path> [--max-usd N] [--max-agents N] [--allow-deferred] [--from stage | --only stage] [--offline] [--dry-run] [--config <file>] [--stage-model M] [--stage-effort E] [--user-settings]
 allowed-tools: Bash(node --disable-warning=ExperimentalWarning ${CLAUDE_PLUGIN_ROOT}/scripts/review.ts:*), Monitor
 ---
 

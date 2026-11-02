@@ -6,6 +6,7 @@ import { readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeBriefs } from "./lib/briefs.ts";
+import { independenceWarning, loadConfig, saveResolved } from "./lib/config.ts";
 import { collectEvidence } from "./lib/evidence.ts";
 import { baselineDiff, loadFindings, writeExports } from "./lib/exports.ts";
 import { validateShard, validateVote, listJson } from "./lib/findings.ts";
@@ -63,8 +64,13 @@ export function initReview(name: string, flags: Record<string, string | true>, c
     created_at: prev?.created_at ?? nowIso(),
   };
   if (!Number.isInteger(scope.max_agents) || scope.max_agents < 1) throw new Error("--max-agents must be a positive integer");
+  const mc = loadConfig(source, str(flags.config), cwd);
   ensureReviewRoot(source);
   writeJson(join(analysis, "scope.json"), scope);
+  // Re-resolved on every init, so editing config.json takes effect on the next run or stage.
+  saveResolved(analysis, mc.config, mc.files);
+  const warnIndep = independenceWarning(mc.config);
+  if (warnIndep) console.error(`warning: ${warnIndep}`);
   writeText(join(analysis, "REVIEW_SCOPE.md"), [
     `# Review scope — ${name}`, "",
     `- source (read-only): \`${source}\``, `- analysis_dir: \`${analysis}\``,

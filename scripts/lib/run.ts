@@ -13,9 +13,25 @@ import { SHARDED, STAGES, type ShardedStage, type Stage } from "./types.ts";
 import { exists, readJson, str, writeJson } from "./util.ts";
 import { checkFresh } from "./revision.ts";
 import { onStreamLine, RunLog } from "./progress.ts";
+import { agentChoice, loadResolved, stageChoice, type ModelConfig } from "./config.ts";
 
 const MODEL_STAGES: Stage[] = ["preflight", "assess", "map", "deep", "security", "consolidate", "verify", "architecture", "report"];
 const isSharded = (s: Stage): s is ShardedStage => (SHARDED as readonly string[]).includes(s);
+
+/**
+ * Flags that keep each headless stage's fixed prompt small: every fresh process writes
+ * its system prompt + tool definitions to the cache before doing any work, so user-level
+ * MCP servers (their tool schemas) and user plugins (their skills, SessionStart hooks)
+ * are paid for once per stage and per retry. This plugin is loaded via --plugin-dir and
+ * its hooks still run (unlike --bare, which would disable the guard).
+ */
+export function stageArgs(stage: Stage, config: ModelConfig, o: { model?: string; effort?: string; userSettings?: boolean } = {}): string[] {
+  // Pinned: a stage never silently inherits the user's default model. Roles and
+  // defaults live in config.ts; --stage-model / --stage-effort override every stage.
+  const d = stageChoice(config, stage);
+  return ["--model", o.model ?? d.model, "--effort", o.effort ?? d.effort, "--strict-mcp-config",
+    ...(o.userSettings ? [] : ["--setting-sources", "project,local"])];
+}
 
 /** Tools a headless stage may use. Bash is limited to read-only commands + this CLI. */
 export function allowedTools(pluginRoot: string): string[] {
@@ -29,7 +45,17 @@ export function allowedTools(pluginRoot: string): string[] {
   ];
 }
 
-interface Usage { stage: string; input_tokens: number; output_tokens: number; total_cost_usd: number; duration_ms?: number; agents?: number }
+// input_tokens is the total input processed (uncached + cache reads + cache writes);
+// the split is kept because the three are priced 1x / 0.1x / 1.25x.
+interface Usage { stage: string; input_tokens: number; output_tokens: number; total_cost_usd: number; uncached_input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; duration_ms?: number; agents?: number; models?: Record<string, number> }
+
+/** Per-model spend from the result event's modelUsage (covers subagents, which the top-level usage does not). */
+function modelCosts(mu: unknown): Record<string, number> | undefined {
+  if (!mu || typeof mu !== "object") return undefined;
+  const out: Record<string, number> = {};
+  for (const [m, v] of Object.entries(mu as Record<string, { costUSD?: number }>)) if (typeof v?.costUSD === "number") out[m] = Math.round(v.costUSD * 1e6) / 1e6;
+  return Object.keys(out).length ? out : undefined;
+}
 
 export function recordUsage(analysis: string, stage: string, data: Record<string, unknown>, agents?: number): number {
   const u = (data.usage ?? {}) as Record<string, number>;
@@ -38,6 +64,10 @@ export function recordUsage(analysis: string, stage: string, data: Record<string
     input_tokens: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
     output_tokens: u.output_tokens ?? 0,
     total_cost_usd: Number(data.total_cost_usd ?? 0) || 0,
+    uncached_input_tokens: u.input_tokens ?? 0,
+    cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+    models: modelCosts(data.modelUsage),
     duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : undefined,
     ...(agents ? { agents } : {}),
   };
@@ -47,7 +77,12 @@ export function recordUsage(analysis: string, stage: string, data: Record<string
   const i = stages.findIndex((s) => s.stage === stage);
   if (i >= 0) {
     const s = stages[i]!;
+    const add = (a?: number, b?: number) => (a ?? 0) + (b ?? 0);
+    const models = { ...(s.models ?? {}) };
+    for (const [m, c] of Object.entries(entry.models ?? {})) models[m] = add(models[m], c);
     stages[i] = { ...s, input_tokens: s.input_tokens + entry.input_tokens, output_tokens: s.output_tokens + entry.output_tokens,
+      uncached_input_tokens: add(s.uncached_input_tokens, entry.uncached_input_tokens), cache_read_input_tokens: add(s.cache_read_input_tokens, entry.cache_read_input_tokens),
+      cache_creation_input_tokens: add(s.cache_creation_input_tokens, entry.cache_creation_input_tokens), models,
       total_cost_usd: s.total_cost_usd + entry.total_cost_usd, duration_ms: (s.duration_ms ?? 0) + (entry.duration_ms ?? 0), agents: (s.agents ?? 0) + (entry.agents ?? 0) };
   } else stages.push(entry);
   const totals = {
@@ -100,6 +135,9 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   say(`source:    ${source}  (read-only)\nartefacts: ${analysis}  (beside the code, .gitignore'd — never $HOME)`);
   say(`live log:  tail -f ${log.logPath}\ndashboard: /review-dashboard (pane) · status line under the prompt while this runs`);
   const scope = initReview(name, flags);
+  const mc = loadResolved(analysis);
+  const show = (c: { model?: string; effort?: string }, fallback: string) => `${c.model ?? fallback}${c.effort ? `/${c.effort}` : ""}`;
+  say(`models:    main ${show(agentChoice(mc, "quality-reviewer"), "sonnet")} · evaluator ${show(agentChoice(mc, "finding-verifier"), "opus")} · writer ${show(stageChoice(mc, "report"), "")} · orchestrator ${show(stageChoice(mc, "verify"), "")}  (${join(analysis, "config.json")})`);
   const maxUsd = str(flags["max-usd"]) ? Number(flags["max-usd"]) : scope.max_usd;
   const runner = str(flags.runner) ?? process.env.REVIEW_RUN_RUNNER ?? "claude";
   const env = { ...process.env, CODE_REVIEW_ACTIVE: "1", CODE_REVIEW_OUT: analysis, PYTHONDONTWRITEBYTECODE: "1" };
@@ -120,13 +158,15 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   const spawnStage = async (stage: Stage, agents?: number): Promise<number> => {
     const prompt = `/code-review-harness:review-${stage} ${name}`;
     const args = ["-p", prompt];
+    const pin = stageArgs(stage, loadResolved(analysis), { model: str(flags["stage-model"]), effort: str(flags["stage-effort"]), userSettings: flags["user-settings"] === true });
     if (runner === "claude") {
       // stream-json: one event per line while the stage runs, so the terminal,
       // run.log and the dashboard show tool calls and agents as they happen.
       args.push("--output-format", "stream-json", "--verbose", "--plugin-dir", pluginRoot, "--permission-mode", "default", "--allowedTools", ...allowedTools(pluginRoot));
+      args.push(...pin);
       if (maxUsd !== undefined) args.push("--max-budget-usd", String(Math.max(0.01, maxUsd - spent(analysis))));
     }
-    if (dry) { say(`[dry-run] (cwd=${source}) ${runner} -p ${JSON.stringify(prompt)}`); return 0; }
+    if (dry) { say(`[dry-run] (cwd=${source}) ${runner} -p ${JSON.stringify(prompt)}${runner === "claude" ? " " + pin.slice(0, 4).join(" ") : ""}`); return 0; }
     say(`==> ${stage}: fresh process (context-isolated)`);
     log.stage(stage);
     const [bin, ...pre] = runner.split(/\s+/);

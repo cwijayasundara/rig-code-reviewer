@@ -1,0 +1,9 @@
+{
+  "$comment": "Copy to <repo>/.code-review/config.json (committable) or pass --config <file>. Every key is optional; models are aliases (opus, sonnet, haiku, fable) or claude-* ids; effort is low|medium|high|xhigh|max.",
+  "main": { "model": "sonnet" },
+  "evaluator": { "model": "opus", "effort": "high" },
+  "writer": { "model": "sonnet", "effort": "medium" },
+  "orchestrator": { "model": "sonnet", "effort": "low" },
+  "stages": { "architecture": { "model": "opus" } },
+  "agents": { "security-auditor": { "effort": "xhigh" } }
+}

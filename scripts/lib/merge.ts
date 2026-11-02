@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { applyConsolidation } from "./consolidate.ts";
 import { applyVotes, loadAccepted, loadShards, loadVotes, mergeShards, verifyDeferred } from "./findings.ts";
 import { loadScope } from "./paths.ts";
-import type { Finding, Plan } from "./types.ts";
+import { taskOuts, type Finding, type Plan } from "./types.ts";
 import { exists, readJson, readText, writeJson, writeText } from "./util.ts";
 import { readdirSync } from "node:fs";
 
@@ -54,7 +54,7 @@ function planLost(analysis: string, stage: string): { lost: string[]; deferred: 
   const plan = readJson<Plan | null>(join(analysis, "plan", `${stage}.json`), null);
   if (!plan) return { lost: [], deferred: [] };
   return {
-    lost: plan.run.filter((t) => !exists(join(analysis, t.out))).map((t) => `${stage}:${t.key}`),
+    lost: plan.run.filter((t) => taskOuts(t).some((o) => !exists(join(analysis, o)))).map((t) => `${stage}:${t.key}`),
     deferred: plan.deferred.map((k) => `${stage}:${k}`),
   };
 }

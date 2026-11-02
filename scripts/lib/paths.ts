@@ -35,7 +35,8 @@ export function loadScope(analysis: string): Scope | null {
 export function ensureReviewRoot(source: string): string {
   const root = join(source, REVIEW_DIR);
   mkdirSync(root, { recursive: true });
-  if (!exists(join(root, ".gitignore"))) writeText(join(root, ".gitignore"), "*\n");
+  // Everything here is generated, except the model config a team may want to commit.
+  if (!exists(join(root, ".gitignore"))) writeText(join(root, ".gitignore"), "*\n!config.json\n");
   return root;
 }
 

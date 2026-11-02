@@ -34,7 +34,18 @@ The harness is loaded per project: a review only needs the plugin in the session
 /code-review-harness:review-run <name> --source . --max-usd 25
 ```
 
-**Budget:** each stage process carries ~$0.25–0.35 of fixed overhead, then agents scale with review units × dimensions and with findings (security findings cost three verifier votes each). Live runs measured ~$4–6 for a 20-line seeded repository with all eight dimensions; set `--max-usd` and read the per-stage estimate the driver prints before each sharded stage (estimates self-calibrate from `usage.json`). The driver checks the budget before every batch of `--max-agents` tasks; when it is reached, the run stops with the resume command and the remaining work stays queued. Unfinished panels become needs-human — never silently confirmed.
+**Budget:** every fresh process or agent pays a fixed start-up cost (its system prompt and tools written to the prompt cache) before reading any code, so cost tracks how many agents start, not how long their contexts get. Stages run on pinned models with user MCP servers and plugins left out; small review units (< 1,000 lines) get one all-dimension reviewer and one all-category auditor instead of one specialist each; verifiers judge up to 5 findings of one file per lens. set `--max-usd` and read the per-stage estimate the driver prints before each sharded stage (estimates self-calibrate from `usage.json`). The driver checks the budget before every batch of `--max-agents` tasks; when it is reached, the run stops with the resume command and the remaining work stays queued. Unfinished panels become needs-human — never silently confirmed.
+
+**Models:** every role is configurable. Put a `config.json` in `<repo>/.code-review/` (it is the one file there git does not ignore, so a team can commit it) or pass `--config <file>` to `review` / `review-run`; the file wins over the repo one, which wins over the defaults. Example: [`docs/config.example.json`](docs/config.example.json).
+
+| Role | Runs | Default |
+|---|---|---|
+| `main` | the finders: deep-review specialists, threat modeler, security auditor, consolidator | each agent's frontmatter (Sonnet) |
+| `evaluator` | the verifiers that confirm or refute every finding | frontmatter (Opus) |
+| `writer` | the prose stages: preflight, assess, map, architecture, report | Sonnet, medium (follows `main.model` if only that is set) |
+| `orchestrator` | the dispatch-only stages: deep, security, consolidate, verify | Sonnet, low |
+
+`stages.<stage>` and `agents.<agent>` override one stage or agent. The resolved choice is frozen into `<analysis>/config.json` at init (models may not write either file), printed at the start of a run, and per-model spend lands in `usage.json`. Keep `evaluator` on a different model from `main`: a model's blind spot can pass its own check, so init warns when they match.
 
 **Watching a run:** the driver prints `live log: tail -f <analysis>/run.log`. That log carries every tool call and agent start of every stage as it happens (type `! tail -f …` to stream it into the session). A status line under the prompt shows stage · elapsed · tool calls · agents · cost for the whole run. The "Code review" pane opens by itself when a run starts (on terminals 144 columns or wider), or any time with `/review-dashboard`. In chat, the skill relays each stage start and finish through `review.ts watch <name>`.
 
@@ -46,10 +57,10 @@ One fresh headless Claude process per stage (context isolation by construction),
 | preflight | stack, scope boundary, missing source, execution status → `PREFLIGHT.md` | model |
 | assess | inventory, SLOC, complexity, churn × complexity hotspots, ownership/bus factor, scanner packs → `evidence.json`; tree fingerprint → `REVISION.json`; analyst `ASSESSMENT.md` | script + model |
 | map | modules (oversized dirs auto-split), typed edges, entry points, data stores, flows → `topology.json` (validated) | model |
-| deep | one specialist per review unit × dimension (small modules packed into units of ≥1,500 SLOC), from a script-computed plan → `raw/deep/*` | agents |
-| security | threat model per review unit, unit × category sweep, gap-fill sweeps → `raw/security/*` | agents |
+| deep | one specialist per review unit × dimension (small modules packed into units of ≥1,500 SLOC; a unit under 1,000 lines gets one all-dimension reviewer), from a script-computed plan → `raw/deep/*` | agents |
+| security | threat model per review unit, unit × category sweep (one all-category auditor for a unit under 1,000 lines), gap-fill sweeps where files sit outside every module or units share a boundary → `raw/security/*` | agents |
 | consolidate | duplicates across dimensions removed: script groups co-located findings, a consolidator decides which share one root cause, script validates and merges → `consolidate/*` | agents + script |
-| verify | merge (dedupe, fingerprint, stable ids) → independent verifier per finding; security: REACHABILITY / IMPACT / DEFENSES panel → `votes/*` → verdicts computed | agents + script |
+| verify | merge (dedupe, fingerprint, stable ids) → independent verifier per finding, batched up to 5 per file; security: REACHABILITY / IMPACT / DEFENSES panel, one agent per lens → `votes/*` → verdicts computed | agents + script |
 | architecture | ISO 25010 scorecard (evidence or "unavailable"), reconstructed ADRs, per-module dispositions → `architecture.json` (validated) | model |
 | report | analyst notes, then deterministic `ANALYSIS_REPORT.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `REPORT.html`, `findings.sarif`, `findings.jsonl` | script |
 | deck | `DECK.pptx`: the whole analysis as an editable Google Slides deck with native diagrams (built automatically after report; `/code-review-harness:review-deck <name>` rebuilds it) | script |

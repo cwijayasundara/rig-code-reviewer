@@ -59,7 +59,7 @@ test("driver runs every stage, retries a lost shard, renders reconciled reports,
   assert.match(dead.out, /driver pid \d+ is gone/);
   writeFileSync(join(a, "progress.json"), JSON.stringify(progress));
   assert.equal(existsSync(join(src, ".code-review", "active.json")), false, "guard deactivated after the run");
-  assert.equal(readFileSync(join(src, ".code-review", ".gitignore"), "utf8"), "*\n");
+  assert.equal(readFileSync(join(src, ".code-review", ".gitignore"), "utf8"), "*\n!config.json\n", "everything generated is ignored; the team model config may be committed");
   // the source tree is untouched apart from the ignored review dir
   const st = spawnGit(src, ["status", "--porcelain"]);
   assert.equal(st.trim(), "", `source changed: ${st}`);

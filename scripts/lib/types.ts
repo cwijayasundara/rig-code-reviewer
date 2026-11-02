@@ -109,7 +109,9 @@ export interface Scope {
   created_at: string;
 }
 
-export interface PlanTask { key: string; agent: string; out: string; input: Record<string, unknown> }
+/** `out` is the task's (first) output; a batched verify task writes one vote per finding, listed in `outs`. */
+export interface PlanTask { key: string; agent: string; out: string; outs?: string[]; input: Record<string, unknown> }
+export const taskOuts = (t: PlanTask): string[] => t.outs ?? [t.out];
 export interface Plan {
   stage: ShardedStage;
   run: PlanTask[];

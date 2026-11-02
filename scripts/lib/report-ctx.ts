@@ -114,7 +114,7 @@ export function uncoveredDimensions(c: Ctx): Set<string> {
   const gaps = [...(c.coverage?.lost_shards ?? []), ...(c.coverage?.deferred_shards ?? [])].map(String);
   for (const g of gaps) {
     // shard keys look like "deep:<dimension>:<module>", "<dimension>--<module>" or "security:<component>:<category>"
-    const parts = g.split(/[:]|--/).filter(Boolean);
+    const parts = g.split(/[:+]|--/).filter(Boolean); // "+" joins the dimensions of a compact shard
     for (const p of parts) if (["architecture", "security", "quality", "performance", "testing", "dependencies", "operability", "data"].includes(p)) out.add(p);
     if (parts[0] === "security") out.add("security");
   }
