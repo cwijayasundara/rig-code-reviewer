@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**Fixed — long sharded batches lost most of their shards, then the retry spent the budget again**
+- A live review on a 103-task repo stopped at its $25 cap with no report: deep batch 2 lost 23 of 24 shards, the one blind retry was cut off by the budget, and about $12 produced nothing. `claude -p` stops background work still running when its wait ceiling passes (10 minutes by default), and each sharded stage runs its agents as a background workflow.
+- Each stage now runs with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (no ceiling) unless the user set the variable, so resuming no longer needs an `export` first.
+- A batch that loses more than half its shards (at least 2), or whose process reports the wait ceiling, is no longer retried: the same cause would lose the same shards again. The driver keeps and merges finished shards, stops with exit 1, and names the cause ("lost 23 of 24 shard(s) in batch 2 … headless wait ceiling") with the resume command; a resume runs only the lost shards. A single stray lost shard still gets its one retry.
+- The ceiling is read only from stderr and the CLI's own system/result events, never from assistant or tool-result events, which carry repository content that may mention the same words.
+
+**Changed — the budget is checked against a whole sharded stage, priced per shard produced**
+- Before a sharded stage spends anything, the driver projects its whole cost (this batch plus deferred tasks, or this batch alone with `--allow-deferred`). Over 1.5× the budget left, the stage does not start: the driver prints the projection and a suggested `--max-usd`, and exits 4. Between 1× and 1.5×, it warns and runs. On the run above, deep (~$46 for 103 tasks, ~$18.50 left) would have stopped at $0 instead of mid-stage.
+- Plan lines show the whole-stage estimate beside the batch estimate.
+- The per-agent estimate divided a stage's spend by agents *started*, so lost agents skewed it. `usage.json` now records `calib_usd` / `calib_agents` per stage: spend and shard count from runs that produced shards, with batches lost wholesale left out. Usage files written before this change fall back to the static defaults until a new batch runs.
+- `--max-usd` is saved with the review; the README now says to pass a higher value when resuming after a budget stop.
+
 **Fixed — the map stage failed on any repo big enough for several analysts**
 - The map stage fanned out one `codebase-analyst` per module but nothing combined their outputs, so the stage improvised a merge script; headless stages block `python3`, and a headless process cannot ask for approval. New `review.ts merge-topology <name>` (`scripts/lib/topology.ts`) does it in the driver: reads `fragments/*.json`, dedupes modules by name (later fragments fill empty fields), drops and counts edges with no from/to, no `file:line` evidence or an unknown type, takes module `lines` from `evidence.json`, validates, and only then writes `topology.json`.
 - `review-map` now has each analyst write `fragments/<module>.json` in the topology shape and runs `R merge-topology`. The guard treats `topology.json` as script-owned and validates fragments on write.
