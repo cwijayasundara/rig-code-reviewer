@@ -45,6 +45,46 @@ export function allowedTools(pluginRoot: string): string[] {
   ];
 }
 
+/**
+ * Tool calls the permission check refused during a headless stage, read from its
+ * stream-json: the result event's `permission_denials`, plus tool_result errors saying
+ * permission was not granted (subagents). A headless process cannot ask the user, so a
+ * refused call usually means a missing CLI command; naming it beats a generic gate error.
+ */
+export class DenialTracker {
+  private uses = new Map<string, string>();
+  private seen = new Set<string>();
+  see(line: string): void {
+    let ev: any;
+    try { ev = JSON.parse(line); } catch { return; }
+    const content: any[] = Array.isArray(ev?.message?.content) ? ev.message.content : [];
+    if (ev?.type === "assistant") {
+      for (const c of content) if (c?.type === "tool_use" && c.id) this.uses.set(c.id, describeCall(c.name, c.input));
+    } else if (ev?.type === "user") {
+      for (const c of content) {
+        const text = typeof c?.content === "string" ? c.content : Array.isArray(c?.content) ? c.content.map((x: any) => x?.text ?? "").join(" ") : "";
+        if (c?.type === "tool_result" && c.is_error && /requested permissions|haven't granted/i.test(text)) this.seen.add(this.uses.get(c.tool_use_id) ?? "a tool call");
+      }
+    } else if (ev?.type === "result" && Array.isArray(ev.permission_denials)) {
+      for (const d of ev.permission_denials) this.seen.add(describeCall(d?.tool_name, d?.tool_input));
+    }
+  }
+  get denied(): string[] { return [...this.seen]; }
+}
+
+function describeCall(name: unknown, input: any): string {
+  const n = typeof name === "string" ? name : "tool";
+  const arg = n === "Bash" ? input?.command : input?.file_path ?? input?.path ?? input?.pattern;
+  return typeof arg === "string" && arg ? `${n}(${arg.length > 120 ? arg.slice(0, 117) + "..." : arg})` : n;
+}
+
+/** " — it needed X, which the headless allowlist denies …" or "" when nothing was refused. */
+export function denialHint(stage: string, denied: string[]): string {
+  if (!denied.length) return "";
+  const list = denied.slice(0, 3).join(", ") + (denied.length > 3 ? ` (+${denied.length - 3} more)` : "");
+  return `\n  stage ${stage} needed ${list}, which the headless allowlist denies. A step that needs an ad-hoc script means the CLI is missing a command — report it rather than widening the allowlist.`;
+}
+
 // input_tokens is the total input processed (uncached + cache reads + cache writes);
 // the split is kept because the three are priced 1x / 0.1x / 1.25x.
 interface Usage { stage: string; input_tokens: number; output_tokens: number; total_cost_usd: number; uncached_input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; duration_ms?: number; agents?: number; models?: Record<string, number> }
@@ -155,6 +195,8 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   if (only) stages = [only as Stage];
   else if (from) stages = MODEL_STAGES.slice(Math.max(0, MODEL_STAGES.indexOf(from as Stage)));
 
+  const denials = new Map<Stage, DenialTracker>();
+  const hint = (stage: Stage) => denialHint(stage, denials.get(stage)?.denied ?? []);
   const spawnStage = async (stage: Stage, agents?: number): Promise<number> => {
     const prompt = `/code-review-harness:review-${stage} ${name}`;
     const args = ["-p", prompt];
@@ -172,8 +214,10 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
     const [bin, ...pre] = runner.split(/\s+/);
     const child = spawn(bin!, [...pre, ...args], { cwd: source, env, stdio: ["ignore", "pipe", "pipe"] });
     let data: Record<string, unknown> | null = null;
+    const tracker = denials.get(stage) ?? new DenialTracker();
+    denials.set(stage, tracker);
     const lines = createInterface({ input: child.stdout });
-    lines.on("line", (l) => { const r = onStreamLine(l, log); if (r) data = r; });
+    lines.on("line", (l) => { const r = onStreamLine(l, log); if (r) data = r; tracker.see(l); });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (c: string) => { process.stderr.write(c); for (const l of c.split("\n")) if (l.trim()) log.warn(`    ! ${l}`); });
     const rc = await new Promise<number>((res) => {
@@ -258,9 +302,9 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
       }
       const status = writeStatus(analysis);
       if (dry) continue;
-      if (rc !== 0) { warn(`error: stage ${stage} exited ${rc}; state in ${analysis}/status.json; resume: /code-review-harness:review-run ${name} --source ${source}`); return rc || 1; }
+      if (rc !== 0) { warn(`error: stage ${stage} exited ${rc}; state in ${analysis}/status.json; resume: /code-review-harness:review-run ${name} --source ${source}${hint(stage)}`); return rc || 1; }
       if (!gate(analysis, stage)) {
-        warn(`error: stage ${stage} finished but its gate is not met. Next: ${status.stages.find((s) => s.stage === stage)?.command}. Lost: ${status.shards.lost.slice(0, 10).join(", ") || "none"}`);
+        warn(`error: stage ${stage} finished but its gate is not met. Next: ${status.stages.find((s) => s.stage === stage)?.command}. Lost: ${status.shards.lost.slice(0, 10).join(", ") || "none"}${hint(stage)}`);
         return 1;
       }
       say(`--- ${stage}: done · findings ${status.findings.total} · spent $${spent(analysis).toFixed(2)}`);

@@ -20,6 +20,7 @@ import { checkFresh, finaliseRevision, stampRevision } from "./lib/revision.ts";
 import { runScanners } from "./lib/scanners.ts";
 import { writeStatus } from "./lib/status.ts";
 import { suggestModules } from "./lib/modules.ts";
+import { mergeTopology } from "./lib/topology.ts";
 import { runDriver } from "./lib/run.ts";
 import { watchRun } from "./lib/progress.ts";
 import { validateArchitecture, validateTopology } from "./lib/architecture.ts";
@@ -140,6 +141,19 @@ export const COMMANDS: Record<string, Cmd> = {
   "suggest-modules": {
     usage: "suggest-modules <name>   (deterministic module candidates from evidence; oversized dirs split)",
     run: (pos) => { const { analysis } = scopeOrDie(pos[0]); console.log(JSON.stringify(suggestModules(analysis), null, 2)); return 0; },
+  },
+  "merge-topology": {
+    usage: "merge-topology <name>   (map stage: fragments/*.json -> topology.json; dedupes modules, drops uncited edges, SLOC from evidence)",
+    run: (pos) => {
+      const { analysis } = scopeOrDie(pos[0]);
+      const r = mergeTopology(analysis);
+      const d = r.dropped_edges;
+      console.log(`merge-topology: ${r.fragments} fragment(s) · ${r.modules} module(s) (${r.duplicate_modules} duplicate(s) merged) · ${r.edges} edge(s) · dropped ${d.missing_from_or_to + d.bad_evidence + d.bad_type} (no from/to ${d.missing_from_or_to} · uncited ${d.bad_evidence} · bad type ${d.bad_type})`);
+      for (const n of r.invalid_fragments) console.log(`INVALID fragments/${n}: not a JSON object (skipped)`);
+      for (const e of r.errors) console.log(`ERROR ${e}`);
+      console.log(r.written ? `wrote ${join(analysis, "topology.json")}` : "topology.json NOT written — fix the fragments and re-run merge-topology");
+      return r.written ? 0 : 1;
+    },
   },
   plan: {
     usage: "plan <name> <deep|security|consolidate|verify> [--max-agents N] [--continue-deferred] [--json]",

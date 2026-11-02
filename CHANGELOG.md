@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Fixed — the map stage failed on any repo big enough for several analysts**
+- The map stage fanned out one `codebase-analyst` per module but nothing combined their outputs, so the stage improvised a merge script; headless stages block `python3`, and a headless process cannot ask for approval. New `review.ts merge-topology <name>` (`scripts/lib/topology.ts`) does it in the driver: reads `fragments/*.json`, dedupes modules by name (later fragments fill empty fields), drops and counts edges with no from/to, no `file:line` evidence or an unknown type, takes module `lines` from `evidence.json`, validates, and only then writes `topology.json`.
+- `review-map` now has each analyst write `fragments/<module>.json` in the topology shape and runs `R merge-topology`. The guard treats `topology.json` as script-owned and validates fragments on write.
+- Every headless stage skill now says: never write or run ad-hoc scripts; if a step seems to need one, stop and report it.
+- When a stage exits non-zero or misses its gate, `review-run` names the tool calls the permission check refused (from `permission_denials` and permission errors in the stream), e.g. `stage map needed Bash(python3 merge.py), which the headless allowlist denies`.
+
 **Changed — lower token cost per review**
 - Every fresh agent or `claude -p` process pays a fixed start-up cost: its system prompt and tool definitions are written to the prompt cache (1-hour TTL) before it does any work. That, not long contexts, dominated spend: a one-file eval case cost $5.60–6.70, 44% of it in verify (22 Opus agents for 8 findings).
 - Verify batches per file: one agent per (file, lens) judges up to 5 findings and writes one `votes/<id>--<lens>.json` each. Lenses remain separate agents, so the 2-of-3 panel, median severity and corrections are unchanged; votes already on disk are skipped one by one on resume. Security verifier effort `xhigh` → `high`.

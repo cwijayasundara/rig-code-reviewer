@@ -1,6 +1,7 @@
 // Topology / architecture validation and Mermaid generation.
-// Models write topology.json + architecture.json; these validators decide
-// whether they are evidence-backed enough to render.
+// merge-topology writes topology.json from analyst fragments; models write
+// architecture.json. These validators decide whether both are evidence-backed
+// enough to render.
 
 export const EDGE_TYPES = ["call", "dispatch", "read", "write", "import", "http", "event"] as const;
 export const QUALITY_ATTRIBUTES = [

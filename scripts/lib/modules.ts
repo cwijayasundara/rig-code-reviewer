@@ -50,7 +50,7 @@ export const MAX_UNIT_LOC = 4000;
 export interface ReviewUnit { name: string; paths: string[]; modules: string[]; lines: number }
 
 /** SLOC under a module path from evidence (authoritative), else the map's own figure; undefined when unknown. */
-function moduleLines(m: { path: string; lines?: number }, sloc: Record<string, number> | undefined): number | undefined {
+export function moduleLines(m: { path: string; lines?: number }, sloc: Record<string, number> | undefined): number | undefined {
   if (sloc && m.path !== "." && m.path !== "") {
     const p = m.path.replace(/\/+$/, "");
     let n = 0, hit = false;

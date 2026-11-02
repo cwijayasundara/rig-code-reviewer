@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "code-review-harness/topology.schema.json",
   "title": "Topology",
-  "description": "Written by the map stage. Validated by scripts/lib/architecture.ts validateTopology(); every edge, store, external and flow must cite file:line.",
+  "description": "Written by `review.ts merge-topology` from the map stage's fragments/<module>.json (same shape). Validated by scripts/lib/architecture.ts validateTopology(); every edge, store, external and flow must cite file:line.",
   "type": "object",
   "required": ["modules"],
   "$defs": { "cite": { "type": "string", "pattern": "\\S+:\\d+" } },

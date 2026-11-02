@@ -16,7 +16,7 @@ export type Decision = { deny: string } | { block: string } | null;
 
 /** Files only scripts may write (relative to the analysis dir). Matched case-insensitively (APFS/NTFS). */
 const SCRIPT_OWNED = [
-  /^(findings|coverage|evidence|status|usage|scope|diff|config)\.json$/i, /^revision\.json$/i, /^threat_model\.md$/i,
+  /^(findings|coverage|evidence|status|usage|scope|diff|config|topology)\.json$/i, /^revision\.json$/i, /^threat_model\.md$/i,
   /^(analysis_report|architecture|roadmap|review_scope)\.md$/i, /^report\.html$/i, /^deck\.pptx$/i, /^findings\.(sarif|jsonl)$/i,
   /^plan\//i, /^briefs\//i, /^scanners\//i, /^raw\/scanner\//i, /^diagrams\//i,
 ];
@@ -193,7 +193,7 @@ export function validateOnWrite(p: HookPayload): Decision {
   const raw = String(p.tool_input?.file_path ?? "");
   if (!raw.endsWith(".json")) return null;
   const target = resolve(cwd, raw);
-  const m = target.match(/^(.*)\/(raw\/(?:deep|security)\/[^/]+\.json|votes\/[^/]+\.json|consolidate\/[^/]+\.json|topology\.json|architecture\.json)$/);
+  const m = target.match(/^(.*)\/(raw\/(?:deep|security)\/[^/]+\.json|votes\/[^/]+\.json|consolidate\/[^/]+\.json|fragments\/[^/]+\.json|topology\.json|architecture\.json)$/);
   if (!m) return null;
   const analysis = m[1]!;
   const scope = loadScope(analysis);
@@ -204,7 +204,7 @@ export function validateOnWrite(p: HookPayload): Decision {
     : rel.startsWith("raw/") ? validateShard(obj, scope.source)
     : rel.startsWith("votes/") ? validateVote(obj, basename(rel))
     : rel.startsWith("consolidate/") ? validateDecision(obj, planGroup(analysis, basename(rel, ".json")))
-    : rel === "topology.json" ? validateTopology(obj)
+    : rel === "topology.json" || rel.startsWith("fragments/") ? validateTopology(obj)
     : validateArchitecture(obj);
   if (!errors.length) return null;
   if (errors.length > 25) errors = [...errors.slice(0, 25), `(+${errors.length - 25} more)`];

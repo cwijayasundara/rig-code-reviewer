@@ -5,12 +5,15 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { COMMANDS } from "../scripts/review.ts";
-import { allowedTools, recordUsage, stageArgs } from "../scripts/lib/run.ts";
+import { allowedTools, DenialTracker, denialHint, recordUsage, stageArgs } from "../scripts/lib/run.ts";
+import { mergeTopology } from "../scripts/lib/topology.ts";
+import { validateTopology } from "../scripts/lib/architecture.ts";
+import { guardEdit } from "../scripts/lib/guard.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { AGENT } from "../scripts/lib/plan.ts";
 import { hasSecret, redact } from "../scripts/lib/redact.ts";
-import { FAKE_AWS_KEY, ROOT } from "./testkit.ts";
+import { FAKE_AWS_KEY, put, ROOT } from "./testkit.ts";
 
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 const walk = (dir: string): string[] => readdirSync(join(ROOT, dir)).flatMap((n) => {
@@ -122,4 +125,65 @@ test("selftest: every gate rejects a seeded violation (a check that cannot fail 
   const r = redact(`aws ${FAKE_AWS_KEY} and password: s3cr3tvalue`);
   assert.equal(r.count, 2);
   assert.doesNotMatch(r.text, /AKIAABCD|s3cr3tvalue/);
+});
+
+const HEADLESS = ["preflight", "assess", "map", "deep", "security", "consolidate", "verify", "architecture", "report"] as const;
+
+test("every headless stage skill forbids ad-hoc scripts (a missing CLI command shows up as a stop, not a refused permission)", () => {
+  for (const st of HEADLESS) assert.match(read(`skills/review-${st}/SKILL.md`), /Never write or run ad-hoc scripts; if a step seems to need one, stop and report it\./, st);
+  // The map stage merges analyst fragments through the CLI and never writes topology.json itself.
+  const map = read("skills/review-map/SKILL.md");
+  assert.match(map, /fragments\/<module>\.json/);
+  assert.match(map, /`R merge-topology \$ARGUMENTS`/);
+});
+
+test("merge-topology: fragments sharing a module merge into one schema-valid topology.json; bad edges dropped and counted", () => {
+  const a = mkdtempSync(join(tmpdir(), "crh-topo-"));
+  put(a, "evidence.json", { file_sloc: { "src/api/a.ts": 40, "src/api/b.ts": 60, "src/db/x.ts": 25 } });
+  put(a, "fragments/api.json", {
+    modules: [{ name: "api", path: "src/api", lines: 7, kind: "service" }, { name: "db", path: "src/db" }],
+    edges: [{ from: "api", to: "db", type: "call", evidence: "src/api/a.ts:3" }, { from: "api", type: "call", evidence: "src/api/a.ts:9" }],
+    data_stores: [{ name: "pg", evidence: "src/db/x.ts:1" }], observations: ["shared note"],
+  });
+  put(a, "fragments/db.json", {
+    modules: [{ name: "db", path: "src/db", lines: 999, description: "persistence" }],
+    edges: [{ from: "api", to: "db", type: "call", evidence: "src/api/a.ts:3" }, { from: "db", to: "pg", type: "write", evidence: "no citation" }],
+    data_stores: [{ name: "pg", evidence: "src/db/x.ts:1" }], observations: ["shared note"],
+  });
+  const r = mergeTopology(a);
+  assert.equal(r.written, true, r.errors.join("; "));
+  assert.deepEqual([r.fragments, r.modules, r.duplicate_modules, r.edges], [2, 2, 1, 1]);
+  assert.deepEqual(r.dropped_edges, { missing_from_or_to: 1, bad_evidence: 1, bad_type: 0 });
+  const t = JSON.parse(readFileSync(join(a, "topology.json"), "utf8"));
+  assert.deepEqual(validateTopology(t), []);
+  const db = t.modules.find((m: { name: string }) => m.name === "db");
+  assert.deepEqual([t.modules.find((m: { name: string }) => m.name === "api").lines, db.lines, db.description], [100, 25, "persistence"], "lines from evidence; later fragment fills gaps");
+  assert.deepEqual([t.data_stores.length, t.observations], [1, ["shared note"]]);
+
+  const empty = mkdtempSync(join(tmpdir(), "crh-topo-"));
+  const e = mergeTopology(empty);
+  assert.equal(e.written, false);
+  assert.match(e.errors[0]!, /no fragments/);
+  assert.equal(existsSync(join(empty, "topology.json")), false);
+});
+
+test("guard: topology.json is script-owned while a review is active", () => {
+  const src = mkdtempSync(join(tmpdir(), "crh-src-"));
+  const analysis = join(src, ".code-review", "r");
+  put(analysis, "scope.json", { name: "r", source: src, analysis_dir: analysis });
+  put(src, ".code-review/active.json", { name: "r", analysis_dir: analysis, source: src });
+  const d = guardEdit({ tool_name: "Write", cwd: src, tool_input: { file_path: join(analysis, "topology.json") } });
+  assert.ok(d && "deny" in d && /merge|review\.ts/.test(d.deny), JSON.stringify(d));
+  assert.equal(guardEdit({ tool_name: "Write", cwd: src, tool_input: { file_path: join(analysis, "fragments", "api.json") } }), null);
+});
+
+test("stage runner names the tool calls the permission check refused", () => {
+  const t = new DenialTracker();
+  t.see(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "python3 merge.py" } }] } }));
+  t.see(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: true, content: "Claude requested permissions to use Bash, but you haven't granted it yet." }] } }));
+  t.see(JSON.stringify({ type: "result", permission_denials: [{ tool_name: "Bash", tool_use_id: "t1", tool_input: { command: "python3 merge.py" } }] }));
+  t.see("not json");
+  assert.deepEqual(t.denied, ["Bash(python3 merge.py)"]);
+  assert.match(denialHint("map", t.denied), /stage map needed Bash\(python3 merge\.py\), which the headless allowlist denies/);
+  assert.equal(denialHint("map", []), "");
 });

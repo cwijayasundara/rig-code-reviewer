@@ -23,7 +23,13 @@ const swallow = { dimension: "quality", severity: "Medium", confidence: "high", 
 switch (stage) {
   case "preflight": put("PREFLIGHT.md", "# Preflight\nPython, no build. Execution: not run.\n"); break;
   case "assess": put("ASSESSMENT.md", "# Assessment\nOne module, src/app.py:2 entry.\n"); break;
-  case "map": put("topology.json", { modules: [{ name: "core", path: "src", lines: 6 }], edges: [], entry_points: [{ name: "run", kind: "function", file: "src/app.py", line: 2 }], data_stores: [{ name: "db", kind: "sql", evidence: "src/app.py:4" }], externals: [], flows: [], observations: [] }); break;
+  case "map": {
+    // One analyst fragment, then the script merges it (the skill never writes topology.json).
+    put("fragments/core.json", { modules: [{ name: "core", path: "src", lines: 999 }], edges: [], entry_points: [{ name: "run", kind: "function", file: "src/app.py", line: 2 }], data_stores: [{ name: "db", kind: "sql", evidence: "src/app.py:4" }], externals: [], flows: [], observations: [] });
+    const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", CLI, "merge-topology", name], { encoding: "utf8", env: process.env });
+    if (r.status !== 0) { process.stderr.write(r.stdout + r.stderr); process.exit(1); }
+    break;
+  }
   case "deep": {
     const marker = join(A, ".stub-lost");
     args("deep").tasks.forEach(([key], i) => {
