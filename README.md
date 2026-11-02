@@ -13,9 +13,13 @@ The harness is loaded per project: a review only needs the plugin in the session
 1. **Load the plugin for one review session.** Start Claude Code from the root of the repo you want reviewed:
 
    ```bash
+   PLUGIN=/path/to/your/clone          # the folder that contains .claude-plugin/plugin.json
+   ls "$PLUGIN/.claude-plugin/plugin.json"   # must print the file
    cd /path/to/repo-under-review
-   claude --plugin-dir /abs/path/to/rig-code-reviewer
+   claude --plugin-dir "$PLUGIN"
    ```
+
+   Check the path first: Claude Code **silently ignores a `--plugin-dir` that does not exist**, and the only symptom is that `/code-review-harness:…` commands are not found. A `git clone` creates `rig-code-reviewer/`, but a renamed or versioned folder (e.g. `rig_code_reviewer_v1.0/`) needs its own name. In the session, typing `/code-review-harness:` should list the commands; if it doesn't, the path is wrong.
 
    That session is all a review needs; `/code-review-harness:review-run` spawns its stage processes with the same plugin directory.
 2. **Or keep it on for a repo you review regularly** — install at project scope:
