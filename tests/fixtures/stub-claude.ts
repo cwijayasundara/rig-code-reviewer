@@ -2,7 +2,8 @@
 // each model stage the way the skills instruct: write prose / agent shards /
 // votes into the analysis dir, then (report stage) call `review.ts render`.
 // STUB_LOSE_ONCE=1 drops the first deep shard on the first attempt to
-// exercise the driver's lost-shard retry.
+// exercise the driver's lost-shard retry; STUB_LOSE_ALL=1 drops the whole
+// first deep batch to exercise the no-retry stop.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -32,6 +33,13 @@ switch (stage) {
   }
   case "deep": {
     const marker = join(A, ".stub-lost");
+    put(".stub-ceiling", process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? "unset");
+    // STUB_LOSE_ALL=1: the first deep batch loses every shard the way the headless wait ceiling does.
+    if (process.env.STUB_LOSE_ALL === "1" && !existsSync(marker)) {
+      writeFileSync(marker, "1");
+      process.stderr.write("Background tasks still running after 600000ms were stopped (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS)\n");
+      break;
+    }
     args("deep").tasks.forEach(([key], i) => {
       if (i === 0 && process.env.STUB_LOSE_ONCE === "1" && !existsSync(marker)) { writeFileSync(marker, "1"); return; }
       put(`raw/deep/${key}.json`, { shard: key, filesRead: ["src/app.py"], notReached: [], findings: /^(quality|[a-z+]*\+quality)(\+|--)/.test(key) ? [swallow] : [] });

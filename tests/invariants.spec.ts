@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { COMMANDS } from "../scripts/review.ts";
-import { allowedTools, DenialTracker, denialHint, recordUsage, stageArgs } from "../scripts/lib/run.ts";
+import { allowedTools, CeilingTracker, DenialTracker, denialHint, recordUsage, stageArgs, stageEnv, systemicLoss } from "../scripts/lib/run.ts";
 import { mergeTopology } from "../scripts/lib/topology.ts";
 import { validateTopology } from "../scripts/lib/architecture.ts";
 import { guardEdit } from "../scripts/lib/guard.ts";
@@ -175,6 +175,32 @@ test("guard: topology.json is script-owned while a review is active", () => {
   const d = guardEdit({ tool_name: "Write", cwd: src, tool_input: { file_path: join(analysis, "topology.json") } });
   assert.ok(d && "deny" in d && /merge|review\.ts/.test(d.deny), JSON.stringify(d));
   assert.equal(guardEdit({ tool_name: "Write", cwd: src, tool_input: { file_path: join(analysis, "fragments", "api.json") } }), null);
+});
+
+test("stage env lifts the headless wait ceiling unless the user set one", () => {
+  assert.equal(stageEnv({}, "/a").CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "0");
+  assert.equal(stageEnv({ CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "1800000" }, "/a").CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "1800000");
+  assert.equal(stageEnv({}, "/a").CODE_REVIEW_OUT, "/a");
+});
+
+test("lost-shard retry: one stray loss retries, a mostly-lost batch does not", () => {
+  assert.equal(systemicLoss(1, 1), false);
+  assert.equal(systemicLoss(1, 24), false);
+  assert.equal(systemicLoss(12, 24), false);
+  assert.equal(systemicLoss(13, 24), true);
+  assert.equal(systemicLoss(23, 24), true);
+});
+
+test("ceiling tracker reads the CLI's own messages, not repository content", () => {
+  const t = new CeilingTracker();
+  t.see(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", content: "env CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0" }] } }));
+  t.see(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "background agents were stopped" }] } }));
+  assert.equal(t.hit, false);
+  t.see("Background tasks still running after 600000ms were stopped");
+  assert.equal(t.hit, true);
+  const r = new CeilingTracker();
+  r.see(JSON.stringify({ type: "result", result: "Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait longer" }));
+  assert.equal(r.hit, true);
 });
 
 test("stage runner names the tool calls the permission check refused", () => {

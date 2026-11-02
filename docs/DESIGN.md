@@ -86,7 +86,11 @@ path, JSON contract, fenced repository content) and compact workflow args
 (`[key, agent]` pairs). The single workflow `review-tasks.js` dispatches one agent
 per task (threat models first); each agent writes its own output file, which the
 PostToolUse hook validates. Missing outputs are lost shards: retried once by the
-driver, then reported as coverage gaps. Shards older than `REVISION.json` are
+driver, then reported as coverage gaps. A batch that loses most of its shards (or
+whose process reports the headless background-wait ceiling) is not retried: the
+driver keeps what finished and stops, since the same cause would lose them again.
+Each stage runs with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` unless the user set it,
+so a long workflow is not cut off at `claude -p`'s 10-minute default. Shards older than `REVISION.json` are
 stale and re-run. `--from <stage>` forces that stage and the rest to re-run.
 
 After the report gate passes, the driver runs `review.ts deck` ($0, not a stage:

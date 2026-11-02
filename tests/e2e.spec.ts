@@ -99,6 +99,20 @@ test("render refuses when the source changed since assess, and --allow-stale ban
   assert.match(readFileSync(join(src, ".code-review", "st", "ANALYSIS_REPORT.md"), "utf8"), /stale|STALE/);
 });
 
+test("a batch that loses most of its shards stops without a retry, names the wait ceiling, and resumes", () => {
+  const src = repo();
+  const r = cli(["run", "ce", "--source", src, "--runner", STUB, "--offline", "--dimensions", "quality"], { env: { STUB_LOSE_ALL: "1" } });
+  assert.equal(r.code, 1, r.out + r.err);
+  assert.doesNotMatch(r.out, /retrying once/);
+  assert.match(r.err, /deep lost \d+ of \d+ shard\(s\) in batch 1/);
+  assert.match(r.err, /headless wait ceiling \(CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0\)/);
+  const a = join(src, ".code-review", "ce");
+  assert.equal(readFileSync(join(a, ".stub-ceiling"), "utf8"), "0", "the driver lifts the ceiling for every stage");
+  const again = cli(["run", "ce", "--source", src, "--runner", STUB, "--offline"]);
+  assert.equal(again.code, 0, again.out + again.err);
+  assert.match(again.out, /deep: done/);
+});
+
 test("budget: the driver stops before a stage once --max-usd is spent", () => {
   const src = repo();
   const r = cli(["run", "b", "--source", src, "--runner", STUB, "--offline", "--max-usd", "0.02"]);

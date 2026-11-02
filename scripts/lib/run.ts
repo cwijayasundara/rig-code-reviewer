@@ -85,6 +85,41 @@ export function denialHint(stage: string, denied: string[]): string {
   return `\n  stage ${stage} needed ${list}, which the headless allowlist denies. A step that needs an ad-hoc script means the CLI is missing a command — report it rather than widening the allowlist.`;
 }
 
+/**
+ * Environment for a headless stage. A sharded stage runs its agents as a background
+ * workflow, and `claude -p` stops background work still running when its wait ceiling
+ * (10 min by default) passes — a long batch then loses most of its shards at once.
+ * The driver lifts the ceiling (0 = no limit) unless the user set one explicitly.
+ */
+export function stageEnv(base: NodeJS.ProcessEnv, analysis: string): NodeJS.ProcessEnv {
+  return { ...base, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: base.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? "0", CODE_REVIEW_ACTIVE: "1", CODE_REVIEW_OUT: analysis, PYTHONDONTWRITEBYTECODE: "1" };
+}
+
+/**
+ * True once a stage's own output says background work hit the headless wait ceiling.
+ * Only stderr and the CLI's system/result events count: assistant and tool-result
+ * events carry repository content, which may mention the same words.
+ */
+export class CeilingTracker {
+  hit = false;
+  see(line: string): void {
+    if (this.hit) return;
+    let ev: any;
+    try { ev = JSON.parse(line); } catch { ev = undefined; }
+    if (ev !== undefined && ev?.type !== "system" && ev?.type !== "result") return;
+    if (/BG_WAIT_CEILING|background (?:tasks?|agents?|work)\b[^"\n]{0,80}\b(?:stopp|kill|terminat|ceiling|timed? ?out)/i.test(line)) this.hit = true;
+  }
+}
+
+/**
+ * A batch that lost most of its shards failed for one shared reason (a wait ceiling,
+ * a budget stop, an outage), not because a few agents were flaky; retrying it repeats
+ * the failure and spends the budget. A single lost shard always gets its retry.
+ */
+export function systemicLoss(lost: number, planned: number): boolean {
+  return lost >= 2 && lost * 2 > planned;
+}
+
 // input_tokens is the total input processed (uncached + cache reads + cache writes);
 // the split is kept because the three are priced 1x / 0.1x / 1.25x.
 interface Usage { stage: string; input_tokens: number; output_tokens: number; total_cost_usd: number; uncached_input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; duration_ms?: number; agents?: number; models?: Record<string, number> }
@@ -180,7 +215,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   say(`models:    main ${show(agentChoice(mc, "quality-reviewer"), "sonnet")} · evaluator ${show(agentChoice(mc, "finding-verifier"), "opus")} · writer ${show(stageChoice(mc, "report"), "")} · orchestrator ${show(stageChoice(mc, "verify"), "")}  (${join(analysis, "config.json")})`);
   const maxUsd = str(flags["max-usd"]) ? Number(flags["max-usd"]) : scope.max_usd;
   const runner = str(flags.runner) ?? process.env.REVIEW_RUN_RUNNER ?? "claude";
-  const env = { ...process.env, CODE_REVIEW_ACTIVE: "1", CODE_REVIEW_OUT: analysis, PYTHONDONTWRITEBYTECODE: "1" };
+  const env = stageEnv(process.env, analysis);
 
   if (!dry && exists(join(analysis, "REVISION.json")) && !flags.from && !flags.only) {
     const f = checkFresh(analysis, source);
@@ -197,6 +232,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
 
   const denials = new Map<Stage, DenialTracker>();
   const hint = (stage: Stage) => denialHint(stage, denials.get(stage)?.denied ?? []);
+  let ceiling = new CeilingTracker(); // reset per spawn: did *this* process hit the wait ceiling?
   const spawnStage = async (stage: Stage, agents?: number): Promise<number> => {
     const prompt = `/code-review-harness:review-${stage} ${name}`;
     const args = ["-p", prompt];
@@ -216,10 +252,11 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
     let data: Record<string, unknown> | null = null;
     const tracker = denials.get(stage) ?? new DenialTracker();
     denials.set(stage, tracker);
+    const seen = (ceiling = new CeilingTracker());
     const lines = createInterface({ input: child.stdout });
-    lines.on("line", (l) => { const r = onStreamLine(l, log); if (r) data = r; tracker.see(l); });
+    lines.on("line", (l) => { const r = onStreamLine(l, log); if (r) data = r; tracker.see(l); seen.see(l); });
     child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (c: string) => { process.stderr.write(c); for (const l of c.split("\n")) if (l.trim()) log.warn(`    ! ${l}`); });
+    child.stderr.on("data", (c: string) => { process.stderr.write(c); for (const l of c.split("\n")) if (l.trim()) { log.warn(`    ! ${l}`); seen.see(l); } });
     const rc = await new Promise<number>((res) => {
       child.on("error", (e) => { warn(`error: could not start ${bin}: ${e.message}`); res(127); });
       child.on("close", (code) => res(code ?? 1));
@@ -262,6 +299,17 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
       if (rc === 0) {
         if (attemptsOf(analysis, stage) === before) markAttempt(analysis, stage); // unless the skill's `merge --after` did
         const st = buildStatus(analysis).shards.plans[stage];
+        if (st && st.lost > 0 && (ceiling.hit || systemicLoss(st.lost, st.planned))) {
+          // Not retried: the same cause would lose the same shards again. Keep what finished
+          // (merge below) and stop; a resume re-plans and runs the lost shards.
+          runMerge(analysis, stage === "verify" ? { final: true } : {});
+          writeStatus(analysis);
+          const cause = ceiling.hit
+            ? `Cause: Claude Code stopped the stage's background agents at its headless wait ceiling (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=${env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS}). Unset it, or set it to 0, before resuming.`
+            : `Cause not identified: read the end of the ${stage} stage in ${log.logPath}.`;
+          warn(`error: ${stage} lost ${st.lost} of ${st.planned} shard(s) in batch ${batch}. That is one shared failure, not flaky agents, so the driver did not retry it (a retry would fail the same way and spend the budget).\n  ${cause}\n  Finished shards are kept. Resume: /code-review-harness:review-run ${name} --source ${source}`);
+          return 1;
+        }
         if (st && st.lost > 0) {
           // One retry for lost shards; after that they are recorded as coverage gaps.
           say(`--- ${stage}: ${st.lost} shard(s) lost; retrying once`);
