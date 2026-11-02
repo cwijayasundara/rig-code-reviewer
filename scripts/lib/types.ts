@@ -2,6 +2,8 @@
 
 export const DIMENSIONS = ["architecture", "security", "quality", "performance", "testing", "dependencies", "operability", "data"] as const;
 export type Dimension = (typeof DIMENSIONS)[number];
+/** Dimensions judged once over the whole system in the deep stage, not per review unit. */
+export const SYSTEM_DIMENSIONS = ["architecture", "dependencies", "operability", "data"] as const;
 
 export const SEVERITIES = ["Blocker", "Critical", "High", "Medium", "Low", "Nit"] as const;
 export type Severity = (typeof SEVERITIES)[number];

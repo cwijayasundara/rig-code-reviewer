@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**Changed — the deep stage judges system-level dimensions once, not per module**
+- Deep review used to start one specialist per review unit × dimension: a 20-unit repo with all seven non-security dimensions started 140 agents and wrote 140 briefs and 140 shards, and architecture was judged unit by unit through a keyhole (then again over the whole system by `review-architecture`).
+- Following the code-modernization plugin's design (whole-system assessment and topology; per-module shards only for code-local work): architecture, dependencies, operability and data now get one agent each over the whole system (`raw/deep/<dim>--system.json`), and every review unit gets one `module-reviewer` for quality, performance and testing (one specialist when only one of those is in scope). The same 20-unit repo now starts 24 agents.
+- The per-unit compact threshold (`COMPACT_LOC`) now applies to the security stage only.
+- Shard keys still name every dimension they cover, so a lost shard still marks each of them "not fully covered".
+
 ## 2.1.0
 
 **Fixed — long sharded batches lost most of their shards, then the retry spent the budget again**

@@ -20,17 +20,36 @@ function review(dims = "quality,performance,security", modules = 3, lines = 2000
   return { src, a };
 }
 
-test("deep plan: module x dimension, cap defers (named) instead of dropping, resume skips done shards", () => {
-  const { a } = review();
-  let p = buildPlan(a, "deep", { maxAgents: 4 });
-  assert.equal(p.run.length, 4);
+test("deep plan: one code-local reviewer per unit, cap defers (named) instead of dropping, resume skips done shards", () => {
+  const { a } = review("quality,performance,testing,security", 5);
+  let p = buildPlan(a, "deep", { maxAgents: 3 });
+  assert.equal(p.run.length, 3);
   assert.equal(p.deferred.length, 2);
-  assert.match(p.estimate.formula, /3 units x 2 dimensions/);
+  assert.ok(p.run.every((t) => t.agent === "module-reviewer" && t.key.startsWith("quality+performance+testing--")));
+  assert.match(p.estimate.formula, /0 whole-system reviewer\(s\) \(none\) \+ 5 unit\(s\) x 1 reviewer \(quality, performance, testing\)/);
   put(a, `raw/deep/${p.run[0]!.key}.json`, { shard: p.run[0]!.key, filesRead: [], notReached: [], findings: [] });
-  p = buildPlan(a, "deep", { maxAgents: 4 });
+  p = buildPlan(a, "deep", { maxAgents: 3 });
   assert.equal(p.skipped.length, 1);
-  assert.equal(p.run.length, 3, "deferred stay deferred within a run");
-  assert.equal(buildPlan(a, "deep", { maxAgents: 10, continueDeferred: true }).run.length, 5);
+  assert.equal(p.run.length, 2, "deferred stay deferred within a run");
+  assert.equal(buildPlan(a, "deep", { maxAgents: 10, continueDeferred: true }).run.length, 4);
+});
+
+test("deep plan: architecture, dependencies, operability and data run once for the whole system, not per unit", () => {
+  const { src, a } = review("architecture,quality,performance,dependencies,operability,data", 6);
+  const p = buildPlan(a, "deep");
+  assert.deepEqual(p.run.slice(0, 4).map((t) => [t.key, t.agent]), [
+    ["architecture--system", "architecture-critic"], ["dependencies--system", "dependency-analyst"],
+    ["operability--system", "operability-reviewer"], ["data--system", "codebase-analyst"],
+  ]);
+  assert.equal(p.run.length, 4 + 6, "4 system reviewers + 1 reviewer per unit, not 6 units x 6 dimensions");
+  assert.ok(p.run.slice(4).every((t) => t.key.startsWith("quality+performance--")));
+  writeBriefs(a, src, p);
+  const brief = readFileSync(join(a, "briefs/deep/architecture--system.md"), "utf8");
+  assert.match(brief, /WHOLE SYSTEM for ONE dimension: architecture/);
+  assert.match(brief, /m0, m1, m2, m3, m4, m5/);
+  // A single code-local dimension keeps its own specialist.
+  put(a, "scope.json", { ...JSON.parse(readFileSync(join(a, "scope.json"), "utf8")), dimensions: ["architecture", "testing"] });
+  assert.deepEqual(buildPlan(a, "deep").run.map((t) => t.agent), ["architecture-critic", ...Array(6).fill("test-analyst")]);
 });
 
 test("security plan: threat models + categories; memory lens dropped for managed languages and disclosed", () => {
@@ -49,9 +68,9 @@ test("compact mode: a small unit gets one all-dimension reviewer and one all-cat
   assert.deepEqual(deep.run.map((t) => [t.key, t.agent]), [["quality+performance+testing--core", "module-reviewer"]]);
   const sec = buildPlan(a, "security");
   assert.deepEqual(sec.run.map((t) => t.key), ["threat--core", "core--all-categories"], "one unit owning every file: no sweeps");
-  // A big unit keeps one specialist per dimension / category.
+  // A big unit still gets one deep reviewer, but one security auditor per category.
   put(a, "topology.json", { modules: [{ name: "core", path: "src", lines: COMPACT_LOC }], edges: [] });
-  assert.equal(buildPlan(a, "deep").run.length, 3);
+  assert.equal(buildPlan(a, "deep").run.length, 1);
   assert.equal(buildPlan(a, "security").run.filter((t) => t.agent === "security-auditor").length, 4);
   // Files no module owns bring back the outside-components and secrets sweeps.
   put(a, "evidence.json", { languages: { Python: { files: 2, lines: 7 } }, files: ["src/app.py", "deploy/run.sh"] });
@@ -218,10 +237,10 @@ test("a sharded stage with deferred work is not done; only an explicit --allow-d
   for (const t of p.run) put(a, t.out, { shard: t.key, filesRead: [], notReached: [], findings: [] });
   markAttempt(a, "deep");
   let s = buildStatus(a);
-  assert.equal(s.stages.find((x) => x.stage === "deep")!.status, "pending", "4 deferred shards: not done");
+  assert.equal(s.stages.find((x) => x.stage === "deep")!.status, "pending", "1 deferred shard: not done");
   assert.equal(s.next_command, "/code-review-harness:review-deep p");
   buildPlan(a, "deep", { maxAgents: 2, acceptDeferred: true });
   s = buildStatus(a);
   assert.equal(s.stages.find((x) => x.stage === "deep")!.status, "done");
-  assert.equal(s.shards.deferred.length, 4, "accepted deferral is still reported as a gap");
+  assert.equal(s.shards.deferred.length, 1, "accepted deferral is still reported as a gap");
 });

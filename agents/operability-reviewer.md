@@ -1,6 +1,6 @@
 ---
 name: operability-reviewer
-description: Operability and reliability review of one module — logging, observability, configuration, failure behaviour, deployment and rollback risk.
+description: Operability and reliability review of the whole system (once per review, not per module) — logging, observability, configuration, failure behaviour, deployment and rollback risk.
 tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 effort: high

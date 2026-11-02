@@ -1,6 +1,6 @@
 ---
 name: architecture-critic
-description: Adversarial architecture review of one module — boundaries, coupling, data flow, failure modes, over-engineering, missing NFRs. Adapted from code-modernization's architecture-critic (Apache-2.0).
+description: Adversarial architecture review of the whole system (once per review, not per module) — boundaries, coupling, data flow, failure modes, over-engineering, missing NFRs. Adapted from code-modernization's architecture-critic (Apache-2.0).
 tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 effort: high

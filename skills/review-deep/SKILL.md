@@ -1,6 +1,6 @@
 ---
 name: review-deep
-description: Deep review — fan out read-only specialist agents per module x dimension (architecture, quality, performance, testing, dependencies, operability, data) from a script-computed plan; each writes a validated findings shard.
+description: Deep review — one read-only specialist per whole-system dimension (architecture, dependencies, operability, data) plus one code-local reviewer per review unit (quality, performance, testing), from a script-computed plan; each writes a validated findings shard.
 argument-hint: <name> [--max-agents N]
 allowed-tools: Read, Workflow(code-review-harness:review-tasks), Agent, Bash(node --disable-warning=ExperimentalWarning ${CLAUDE_PLUGIN_ROOT}/scripts/review.ts:*)
 ---

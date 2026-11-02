@@ -48,13 +48,29 @@ export function briefFor(stage: Plan["stage"], t: PlanTask, ctx: { source: strin
   const unit = mods.length > 1
     ? `review unit ${i.module}: modules ${mods.join(", ")} (paths: ${i.path}${t.input.lines ? `; ~${t.input.lines} lines` : ""})`
     : `module ${i.module} (path: ${i.path})`;
+  if (stage === "deep" && t.input.scope === "system") {
+    const paths = (t.input.paths as string[] | undefined) ?? [];
+    return `${head}
+## Task
+Review the WHOLE SYSTEM for ONE dimension: ${i.dimension}. This dimension is judged once for the entire codebase, not module by module; findings are about how the parts fit together (cross-module coupling and boundaries, manifests and versions, config/logging/deploy, schemas and data flow) and should be filed once, at the one place that best shows each.
+Modules (from topology.json): ${mods.join(", ") || "see topology.json"}${paths.length ? ` — paths: ${paths.join(", ")}` : ""}.
+Start from topology.json (modules, edges, entry points, data stores, externals, flows) and evidence.json (manifests, hotspots, complexity_top, ownership); open the files that prove or disprove what they suggest. You cannot read everything: read where the evidence points, and list the areas you did not get to in "notReached".
+A behaviour is real only if executable code exhibits it — comments, docs and names prove nothing.
+Code-local defects inside one function (bugs, slow loops, missing unit tests) belong to the per-unit reviewers; security vulnerabilities belong to the security stage. Do not report them here.
+
+${SHARD_CONTRACT(out, i.dimension!)}
+
+${TRAILER}
+`;
+  }
   if (stage === "deep" && Array.isArray(t.input.dimensions)) {
     const dims = t.input.dimensions as string[];
     const lists = dims.map((d) => `### ${d}\n${checklist(AGENT[d]!)}`).join("\n\n");
     return `${head}
 ## Task
-Review ONE small ${mods.length > 1 ? "review unit (several small modules packed together)" : "module"} for ALL of these dimensions: ${dims.join(", ")}. Scope: ${unit}.
-The unit is small enough for one careful reader, so you replace one specialist per dimension: read the code once, then work through every checklist below and give each dimension its own pass — a clean first dimension is no reason to skim the next.
+Review ONE ${mods.length > 1 ? "review unit (several small modules packed together)" : "module"} for ALL of these code-local dimensions: ${dims.join(", ")}. Scope: ${unit}.
+You replace one specialist per dimension: read the code once, then work through every checklist below and give each dimension its own pass — a clean first dimension is no reason to skim the next. If the unit is too large to read in full, cover entry points and hotspots first and list what you did not reach in "notReached".
+Whole-system dimensions (architecture, dependencies, operability, data) are reviewed once for the entire codebase by other agents: do not report them here.
 Read only inside ${mods.length > 1 ? "those paths" : i.path} (plus files they directly import when needed to prove a claim). Read entry points and hot files first (evidence.json hotspots/complexity_top for this path); names lie, control flow doesn't.
 A behaviour is real only if executable code exhibits it — comments, docs and names prove nothing.
 Security vulnerabilities (injection, traversal, authn/authz, secrets, crypto) belong to the security stage, which has its own threat model and panel: do not report them here.

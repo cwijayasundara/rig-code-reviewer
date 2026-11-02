@@ -5,7 +5,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import { validateShard, validateVote } from "./findings.ts";
 import { loadScope } from "./paths.ts";
-import { DIMENSIONS, LENSES, SEV_RANK, CONF_RANK, taskOuts, type Finding, type Plan, type PlanTask, type ShardedStage } from "./types.ts";
+import { DIMENSIONS, SYSTEM_DIMENSIONS, LENSES, SEV_RANK, CONF_RANK, taskOuts, type Finding, type Plan, type PlanTask, type ShardedStage } from "./types.ts";
 import { candidateGroups, validateDecision } from "./consolidate.ts";
 import { preConsolidation } from "./merge.ts";
 import { exists, readJson, writeJson } from "./util.ts";
@@ -21,9 +21,8 @@ export const AGENT: Record<string, string> = {
 const USD_PER_AGENT = { deep: 0.45, security: 0.6, consolidate: 0.12, verify: 0.4 } as const;
 
 /**
- * A review unit under this many source lines gets one deep-review agent for all
- * dimensions and one security auditor for all categories, instead of one per
- * dimension / category. Each agent pays a fixed start-up cost before reading any
+ * A review unit under this many source lines gets one security auditor for all
+ * categories, instead of one per category. Each agent pays a fixed start-up cost before reading any
  * code; on a small unit that cost, not the reading, is most of the bill.
  */
 export const COMPACT_LOC = 1000;
@@ -100,22 +99,25 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
   let formula = "";
   if (stage === "deep") {
     const dims = scope.dimensions.filter((d) => d !== "security" && (DIMENSIONS as readonly string[]).includes(d));
-    let compact = 0;
-    for (const u of units) {
-      if (isCompact(u) && dims.length > 1) {
-        // One agent covers every dimension of a small unit; the key names them all so a
-        // lost shard still marks each dimension as uncovered.
-        compact++;
-        const key = `${dims.join("+")}--${slug(u.name)}`;
-        groups.push([{ key, agent: "module-reviewer", out: `raw/deep/${key}.json`, input: { ...unitInput(u), dimensions: dims } }]);
-        continue;
-      }
-      for (const d of dims) {
-        const key = `${d}--${slug(u.name)}`;
-        groups.push([{ key, agent: AGENT[d]!, out: `raw/deep/${key}.json`, input: { ...unitInput(u), dimension: d } }]);
-      }
+    // Whole-system dimensions get one agent each over the entire codebase; judging
+    // architecture or dependencies one unit at a time only sees a keyhole and files
+    // the same cross-cutting issue once per unit.
+    const system = dims.filter((d) => (SYSTEM_DIMENSIONS as readonly string[]).includes(d));
+    for (const d of system) {
+      const key = `${d}--system`;
+      groups.push([{ key, agent: AGENT[d]!, out: `raw/deep/${key}.json`, input: { scope: "system", dimension: d, modules: modules.map((m) => m.name), paths: modules.map((m) => m.path) } }]);
     }
-    formula = `${units.length - compact} units x ${dims.length} dimensions + ${compact} compact unit(s) x 1 all-dimension reviewer (< ${COMPACT_LOC} lines)${unitsNote}`;
+    // Code-local dimensions: one reviewer per unit reads the code once for all of
+    // them; the key names every dimension so a lost shard marks each one uncovered.
+    const local = dims.filter((d) => !system.includes(d));
+    for (const u of units) {
+      if (!local.length) break;
+      const key = `${local.join("+")}--${slug(u.name)}`;
+      groups.push([local.length > 1
+        ? { key, agent: "module-reviewer", out: `raw/deep/${key}.json`, input: { ...unitInput(u), dimensions: local } }
+        : { key, agent: AGENT[local[0]!]!, out: `raw/deep/${key}.json`, input: { ...unitInput(u), dimension: local[0] } }]);
+    }
+    formula = `${system.length} whole-system reviewer(s) (${system.join(", ") || "none"}) + ${local.length ? units.length : 0} unit(s) x 1 reviewer (${local.join(", ") || "none"})${unitsNote}`;
   } else if (stage === "security") {
     const ev = readJson<{ languages?: Record<string, unknown> }>(join(analysis, "evidence.json"), {});
     const unmanaged = Object.keys(ev.languages ?? {}).some((l) => UNMANAGED.test(l));
