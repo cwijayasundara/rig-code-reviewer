@@ -1,6 +1,6 @@
 ---
 name: security-auditor
-description: Hunts for exploitable weaknesses in one component for one category (or one cross-cutting sweep), and files only those it can trace end to end, tagged with a CWE.
+description: Hunts for exploitable weaknesses in one review unit across every category in its brief (one category at high effort, or one cross-cutting sweep), and files only those it can trace end to end, tagged with a CWE.
 tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 effort: xhigh

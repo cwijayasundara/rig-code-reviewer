@@ -3,7 +3,7 @@ export const meta = {
   description: "Run a code-review stage plan: one read-only specialist agent per task, each following a script-written brief and writing its own validated output file",
   whenToUse: "Run by the review-deep / review-security / review-verify skills with args from <analysis>/plan/<stage>.workflow-args.json: { stage, sourceDir, analysisDir, tasks: [[key, agent], ...] }.",
   phases: [
-    { title: "Threat model", detail: "security stage only: one threat-modeler per component, before the sweep" },
+    { title: "Threat model", detail: "security stage only: one whole-system threat-modeler, before the auditors" },
     { title: "Run", detail: "one agent per planned task; outputs are files validated by hook and merged by script" },
   ],
 };

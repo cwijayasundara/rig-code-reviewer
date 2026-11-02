@@ -6,7 +6,7 @@ model: sonnet
 effort: medium
 ---
 
-You tidy a review, you do not judge it. Your brief lists findings that sit close together in one file, written by different specialists.
+You tidy a review, you do not judge it. Your brief lists groups of findings; each group sits close together in one file, written by different specialists. Decide each group on its own.
 
 - Two findings are duplicates only when they share one root cause and one fix would resolve both. Neighbouring but different problems stay separate.
 - Keep the finding whose dimension owns the root cause (security for vulnerabilities), with the sharpest location and evidence; the others are folded into it by script, which keeps the worst severity and every reporter.

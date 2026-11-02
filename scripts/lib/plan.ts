@@ -37,8 +37,39 @@ function outsideFiles(analysis: string, modules: { path: string }[]): string[] {
   return files.filter((f) => !roots.some((r) => f === r || f.startsWith(r + "/")));
 }
 
-/** Findings one verify agent judges together (same file, same lens). */
+/** Findings one verify agent judges together (same review unit, same lens). */
 export const VERIFY_BATCH = 5;
+/** Co-located groups one consolidator decides together (same review unit). */
+export const CONSOLIDATE_BATCH = 8;
+
+/** The review unit that owns a file (longest matching path), or "outside" when none does. */
+function unitOf(units: ReviewUnit[]): (file: string) => string {
+  const roots = units.flatMap((u) => u.paths.map((p) => ({ unit: slug(u.name), root: p.replace(/\/+$/, "") })))
+    .sort((a, b) => b.root.length - a.root.length);
+  return (file) => roots.find((r) => r.root === "." || r.root === "" || file === r.root || file.startsWith(r.root + "/"))?.unit ?? "outside";
+}
+
+/**
+ * Items grouped by owner, then chunked at `size`, in order of first appearance (so a
+ * severity-sorted input keeps its order). Keys are "<owner>" then "<owner>-2", ...
+ */
+function batchBy<T>(items: T[], ownerOf: (x: T) => string, size: number): { key: string; items: T[] }[] {
+  const out: { key: string; items: T[] }[] = [];
+  const open = new Map<string, { key: string; items: T[] }>();
+  const seq = new Map<string, number>();
+  for (const x of items) {
+    const o = ownerOf(x);
+    let c = open.get(o);
+    if (!c || c.items.length >= size) {
+      const n = (seq.get(o) ?? 0) + 1;
+      seq.set(o, n);
+      c = { key: `${o}${n > 1 ? `-${n}` : ""}`, items: [] };
+      open.set(o, c); out.push(c);
+    }
+    c.items.push(x);
+  }
+  return out;
+}
 
 export const SECURITY_CATEGORIES = {
   "injection-and-input": "SQL/NoSQL/OS command/LDAP/template injection, XSS (incl. javascript: URLs), XXE, unsafe deserialization, SSTI, ReDoS, path traversal, prompt injection into LLM calls",
@@ -123,75 +154,85 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
     const unmanaged = Object.keys(ev.languages ?? {}).some((l) => UNMANAGED.test(l));
     let cats = Object.keys(SECURITY_CATEGORIES).filter((c) => c !== "memory-and-unsafe" || unmanaged);
     if (scope.security_effort === "low") cats = cats.slice(0, 2);
-    for (const u of units) groups.push([{ key: `threat--${slug(u.name)}`, agent: "threat-modeler", out: `threat/${slug(u.name)}.md`, input: unitInput(u) }]);
-    let compact = 0;
+    // The attack surface is a whole-system question (ways in, trust handed across
+    // boundaries), so one threat-modeler maps it once; per-component maps cut every
+    // cross-module data flow in half.
+    const threat = "threat/system.md";
+    groups.push([{ key: "threat--system", agent: "threat-modeler", out: threat, input: { scope: "system", modules: modules.map((m) => m.name), paths: modules.map((m) => m.path) } }]);
+    // Code-local auditing: one auditor per unit works through every category. Only
+    // high effort splits a large unit into one auditor per category.
+    const allCats = { category: cats.join(", "), focus: cats.map((c) => `${c}: ${SECURITY_CATEGORIES[c as keyof typeof SECURITY_CATEGORIES]}`).join("; ") };
+    let split = 0;
     for (const u of units) {
-      const threat = `threat/${slug(u.name)}.md`;
-      if (isCompact(u) && cats.length > 1) {
-        // A small unit gets one auditor working through every category in turn.
-        compact++;
-        const key = `${slug(u.name)}--all-categories`;
-        groups.push([{ key, agent: "security-auditor", out: `raw/security/${key}.json`, input: { ...unitInput(u), threat, category: cats.join(", "), focus: cats.map((c) => `${c}: ${SECURITY_CATEGORIES[c as keyof typeof SECURITY_CATEGORIES]}`).join("; ") } }]);
+      if (scope.security_effort === "high" && !isCompact(u) && cats.length > 1) {
+        split++;
+        for (const c of cats) {
+          const key = `${slug(u.name)}--${c}`;
+          groups.push([{ key, agent: "security-auditor", out: `raw/security/${key}.json`, input: { ...unitInput(u), threat, category: c, focus: SECURITY_CATEGORIES[c as keyof typeof SECURITY_CATEGORIES] } }]);
+        }
         continue;
       }
-      for (const c of cats) {
-        const key = `${slug(u.name)}--${c}`;
-        groups.push([{ key, agent: "security-auditor", out: `raw/security/${key}.json`, input: { ...unitInput(u), threat, category: c, focus: SECURITY_CATEGORIES[c as keyof typeof SECURITY_CATEGORIES] } }]);
-      }
+      const key = `${slug(u.name)}--${cats.length > 1 ? "all-categories" : cats[0]}`;
+      groups.push([{ key, agent: "security-auditor", out: `raw/security/${key}.json`, input: { ...unitInput(u), threat, ...(cats.length > 1 ? allCats : { category: cats[0], focus: SECURITY_CATEGORIES[cats[0] as keyof typeof SECURITY_CATEGORIES] }) } }]);
     }
-    // Gap-fill sweeps only where there is a gap to fill: files no module owns, or
-    // boundaries between units. A single unit owning every file is fully covered by
-    // its own auditors (whose scope includes its tests and fixtures).
+    // Gap-fill sweeps only where there is a gap to fill: files no module owns. The
+    // system threat model already maps cross-unit trust for every auditor; a
+    // dedicated cross-boundary sweep runs only at high effort.
     const ownerless = outsideFiles(analysis, modules).length;
     const sweeps = scope.security_effort === "low" ? [] : [
-      ...(ownerless ? ["outside-components"] : []), ...(units.length > 1 ? ["cross-boundary"] : []), ...(ownerless || units.length > 1 ? ["secrets-everywhere"] : []),
+      ...(ownerless ? ["outside-components"] : []), ...(scope.security_effort === "high" && units.length > 1 ? ["cross-boundary"] : []), ...(ownerless ? ["secrets-everywhere"] : []),
     ];
-    for (const s of sweeps) groups.push([{ key: `sweep--${s}`, agent: "security-auditor", out: `raw/security/sweep--${s}.json`, input: { sweep: s, modules: modules.map((m) => m.path) } }]);
-    formula = `${units.length} threat models + ${units.length - compact} units x ${cats.length} categories + ${compact} compact unit(s) x 1 all-category auditor + ${sweeps.length} sweeps${unitsNote}` + (unmanaged ? "" : " (memory-and-unsafe dropped: managed languages only)");
+    for (const s of sweeps) groups.push([{ key: `sweep--${s}`, agent: "security-auditor", out: `raw/security/sweep--${s}.json`, input: { sweep: s, threat, modules: modules.map((m) => m.path) } }]);
+    formula = `1 whole-system threat model + ${units.length - split} unit(s) x 1 all-category auditor + ${split} unit(s) x ${cats.length} categories (high effort) + ${sweeps.length} sweeps${unitsNote}` + (unmanaged ? "" : " (memory-and-unsafe dropped: managed languages only)");
   } else if (stage === "consolidate") {
+    // One consolidator per review unit judges up to CONSOLIDATE_BATCH co-located
+    // groups, each decision in its own consolidate/<group>.json; a whole agent per
+    // two-finding group spent its start-up cost on one tiny decision.
     const cands = candidateGroups(preConsolidation(analysis));
-    for (const g of cands) groups.push([{ key: g.key, agent: "finding-consolidator", out: `consolidate/${g.key}.json`, input: { group: g.key, file: g.file, members: g.members } }]);
-    formula = `${cands.length} co-located group(s) (same file, lines within 5) x 1 consolidator`;
+    const owner = unitOf(packUnits(modules, sloc));
+    const chunks = batchBy(cands, (g) => owner(g.file), CONSOLIDATE_BATCH);
+    for (const c of chunks) {
+      const todo = c.items.filter((g) => !shardDone(analysis, `consolidate/${g.key}.json`, scope.source));
+      c.items.filter((g) => !todo.includes(g)).forEach((g) => skipped.push(g.key));
+      if (!todo.length) continue;
+      const outs = todo.map((g) => `consolidate/${g.key}.json`);
+      groups.push([{ key: `cons--${c.key}`, agent: "finding-consolidator", out: outs[0]!, outs, input: { groups: todo.map((g) => ({ group: g.key, file: g.file, members: g.members })) } }]);
+    }
+    formula = `${cands.length} co-located group(s) (same file, lines within 5) in ${chunks.length} batch(es) per review unit x 1 consolidator (≤${CONSOLIDATE_BATCH} groups per agent)`;
   } else {
     const data = readJson<{ findings?: Finding[] }>(join(analysis, "findings.json"), {});
     const open = (data.findings ?? []).filter((f) => !f.accepted)
       .sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || CONF_RANK[a.confidence] - CONF_RANK[b.confidence] || a.id.localeCompare(b.id));
-    // Batched per file: one agent per (file chunk, lens) votes on up to VERIFY_BATCH
-    // findings, each into its own votes/<id>--<lens>.json. Every agent pays a fixed
-    // start-up cost (system prompt + tools written to cache), so one agent reading a
-    // file once beats one agent per finding re-reading it. Lenses stay separate
-    // agents, so the 2-of-3 panel stays independent. Chunks keep severity order
-    // (open is sorted), so the cap still defers the least severe work.
-    const chunks: { file: string; sec: boolean; ids: string[] }[] = [];
-    const byKey = new Map<string, { file: string; sec: boolean; ids: string[] }>();
-    for (const f of open) {
-      const sec = f.dimension === "security";
-      const k = `${sec}|${f.file}`;
-      let c = byKey.get(k);
-      if (!c || c.ids.length >= VERIFY_BATCH) { c = { file: f.file, sec, ids: [] }; byKey.set(k, c); chunks.push(c); }
-      c.ids.push(f.id);
-    }
-    const seq = new Map<string, number>();
+    // Batched per review unit: one agent per (unit chunk, lens) votes on up to
+    // VERIFY_BATCH findings, each into its own votes/<id>--<lens>.json. Every agent
+    // pays a fixed start-up cost (system prompt + tools written to cache), so one
+    // agent per unit beats one per file when most files carry a single finding.
+    // Lenses stay separate agents, so the 2-of-3 panel stays independent. Chunks
+    // keep severity order (open is sorted), so the cap still defers the least severe work.
+    const owner = unitOf(packUnits(modules, sloc));
+    const chunks = [
+      ...batchBy(open.filter((f) => f.dimension === "security"), (f) => owner(f.file), VERIFY_BATCH).map((c) => ({ ...c, sec: true })),
+      ...batchBy(open.filter((f) => f.dimension !== "security"), (f) => owner(f.file), VERIFY_BATCH).map((c) => ({ ...c, sec: false })),
+    ];
     const vote = (id: string, lens: string) => `votes/${id}--${lens}.json`;
     let sec = 0, other = 0, secAgents = 0, otherAgents = 0;
     for (const c of chunks) {
-      const n = (seq.get(`${c.sec}|${c.file}`) ?? 0) + 1;
-      seq.set(`${c.sec}|${c.file}`, n);
-      const base = `${slug(c.file)}${n > 1 ? `-${n}` : ""}`;
+      const ids = c.items.map((f) => f.id);
+      const files = [...new Set(c.items.map((f) => f.file))];
       const lenses = c.sec ? [...LENSES] : ["VERIFY"];
       const g: PlanTask[] = [];
       for (const lens of lenses) {
         // Votes already on disk are skipped individually (resume after a partial batch).
-        const todo = c.ids.filter((id) => !shardDone(analysis, vote(id, lens), scope.source));
-        c.ids.filter((id) => !todo.includes(id)).forEach((id) => skipped.push(`${id}--${lens}`));
+        const todo = ids.filter((id) => !shardDone(analysis, vote(id, lens), scope.source));
+        ids.filter((id) => !todo.includes(id)).forEach((id) => skipped.push(`${id}--${lens}`));
         if (!todo.length) continue;
         const outs = todo.map((id) => vote(id, lens));
-        g.push({ key: `${c.sec ? "sec" : "oth"}--${base}--${lens}`, agent: c.sec ? "security-verifier" : "finding-verifier", out: outs[0]!, outs, input: { ids: todo, lens, file: c.file } });
+        g.push({ key: `${c.sec ? "sec" : "oth"}--${c.key}--${lens}`, agent: c.sec ? "security-verifier" : "finding-verifier", out: outs[0]!, outs, input: { ids: todo, lens, files } });
       }
-      if (c.sec) { sec += c.ids.length; secAgents += lenses.length; } else { other += c.ids.length; otherAgents++; }
+      if (c.sec) { sec += ids.length; secAgents += lenses.length; } else { other += ids.length; otherAgents++; }
       if (g.length) groups.push(g);
     }
-    formula = `${sec} security findings in ${secAgents / 3} file batch(es) x 3 lenses + ${other} other findings in ${otherAgents} file batch(es) x 1 verifier (≤${VERIFY_BATCH} findings per agent)`;
+    formula = `${sec} security findings in ${secAgents / 3} unit batch(es) x 3 lenses + ${other} other findings in ${otherAgents} unit batch(es) x 1 verifier (≤${VERIFY_BATCH} findings per agent)`;
   }
 
   const prevDeferred = new Set(opts.continueDeferred ? [] : prev?.deferred ?? []);

@@ -213,7 +213,8 @@ export function validateOnWrite(p: HookPayload): Decision {
 
 /** The group a consolidation decision answers, from the plan the script wrote. */
 function planGroup(analysis: string, key: string): Group | undefined {
-  const plan = readJson<{ run?: { key: string; input: { file?: string; members?: string[] } }[] }>(join(analysis, "plan", "consolidate.json"), {});
-  const t = (plan.run ?? []).find((x) => x.key === key);
-  return t ? { key, file: t.input.file ?? "", members: t.input.members ?? [] } : undefined;
+  // A consolidator task batches several groups; each decision file names one of them.
+  const plan = readJson<{ run?: { input: { groups?: { group: string; file?: string; members?: string[] }[] } }[] }>(join(analysis, "plan", "consolidate.json"), {});
+  const g = (plan.run ?? []).flatMap((x) => x.input.groups ?? []).find((x) => x.group === key);
+  return g ? { key, file: g.file ?? "", members: g.members ?? [] } : undefined;
 }

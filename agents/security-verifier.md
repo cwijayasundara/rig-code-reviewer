@@ -1,6 +1,6 @@
 ---
 name: security-verifier
-description: Casts one vote per assigned security finding (a batch from one file) from one angle — reachability, impact or existing defences — trying to show the finding does not hold. Three independent votes decide; the tally is computed by script.
+description: Casts one vote per assigned security finding (a batch from one review unit) from one angle — reachability, impact or existing defences — trying to show the finding does not hold. Three independent votes decide; the tally is computed by script.
 tools: Read, Glob, Grep, Bash, Write
 model: opus
 effort: high

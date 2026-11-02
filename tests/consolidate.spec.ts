@@ -58,15 +58,40 @@ test("end to end: consolidate plan -> decision (validated on write) -> merge fol
   const plan = buildPlan(a, "consolidate");
   assert.equal(plan.run.length, 1);
   const t = plan.run[0]!;
-  const [keep, other] = (t.input.members as string[]);
-  put(a, t.out, { group: t.key, merges: [{ keep, merge: ["NOT-A-MEMBER"], reason: "x" }] });
+  const [g] = t.input.groups as { group: string; members: string[] }[];
+  const [keep, other] = g!.members;
+  put(a, t.out, { group: g!.group, merges: [{ keep, merge: ["NOT-A-MEMBER"], reason: "x" }] });
   const bad = validateOnWrite({ tool_input: { file_path: join(a, t.out) }, cwd: src });
   assert.ok(bad && "block" in bad && bad.block.includes("not a member"));
-  put(a, t.out, { group: t.key, merges: [{ keep, merge: [other], reason: "the same swallowed exception" }] });
+  put(a, t.out, { group: g!.group, merges: [{ keep, merge: [other], reason: "the same swallowed exception" }] });
   assert.equal(validateOnWrite({ tool_input: { file_path: join(a, t.out) }, cwd: src }), null);
   const r = runMerge(a);
   assert.equal(r.consolidated, 1);
   assert.equal(JSON.parse(readFileSync(join(a, "findings.json"), "utf8")).findings.length, 1);
   assert.equal(buildPlan(a, "consolidate").run.length, 0, "decided groups are not re-planned");
   assert.equal(buildPlan(a, "verify").run.length, 1, "only the kept finding is verified");
+});
+
+test("consolidate plan: one consolidator per review unit decides several groups, each into its own file", () => {
+  const src = tree({ "src/a.py": APP, "src/b.py": APP, "src/c.py": APP });
+  assert.equal(cli(["init", "c2", "--source", src]).code, 0);
+  const a = join(src, ".code-review", "c2");
+  put(a, "topology.json", { modules: [{ name: "core", path: "src", lines: 2000 }], edges: [] });
+  const raw = (dimension: string, file: string) => ({ dimension, severity: "Low", confidence: "high", file, line: 5, title: `${dimension} ${file}`, evidence: `${file}:5`, impact: "i", recommendation: "r", effort: "S" });
+  const files = ["src/a.py", "src/b.py", "src/c.py"];
+  put(a, "raw/deep/operability--core.json", { shard: "operability--core", filesRead: [], notReached: [], findings: files.map((f) => raw("operability", f)) });
+  put(a, "raw/deep/quality--core.json", { shard: "quality--core", filesRead: [], notReached: [], findings: files.map((f) => raw("quality", f)) });
+  runMerge(a);
+  const plan = buildPlan(a, "consolidate");
+  assert.equal(plan.run.length, 1, "3 groups in one unit: one agent");
+  const t = plan.run[0]!;
+  assert.equal(t.key, "cons--core");
+  assert.equal((t.input.groups as unknown[]).length, 3);
+  assert.equal(t.outs!.length, 3);
+  for (const g of t.input.groups as { group: string; members: string[] }[]) {
+    const out = join(a, `consolidate/${g.group}.json`);
+    put(a, `consolidate/${g.group}.json`, { group: g.group, merges: [] });
+    assert.equal(validateOnWrite({ tool_input: { file_path: out }, cwd: src }), null, "the guard finds each batched group in the plan");
+  }
+  assert.equal(buildPlan(a, "consolidate").run.length, 0, "every decided group is skipped on resume");
 });

@@ -60,7 +60,7 @@ test("init freezes the resolved config; agent overrides reach the workflow args 
   assert.deepEqual(JSON.parse(readFileSync(join(a, "config.json"), "utf8")).evaluator, { model: "fable", effort: "high" });
   put(a, "findings.json", { version: 1, findings: [{ id: "SEC-00000001", dimension: "security", severity: "High", confidence: "high", file: "src/app.py", line: 4, title: "t", evidence: "e", impact: "i", recommendation: "r", effort: "S", fingerprint: "v1:x", category: "CWE-89", reporters: 1, shards: [] }] });
   const args = writeBriefs(a, src, buildPlan(a, "verify"));
-  assert.deepEqual(args.tasks[0], ["sec--src_app.py--REACHABILITY", "security-verifier", "fable", "high"]);
+  assert.deepEqual(args.tasks[0], ["sec--outside--REACHABILITY", "security-verifier", "fable", "high"]);
 
   const wf = readFileSync(join(ROOT, "workflows/review-tasks.js"), "utf8").replace(/export const meta = \{[\s\S]*?\n\};/, "");
   const seen: { model?: string; effort?: string }[] = [];

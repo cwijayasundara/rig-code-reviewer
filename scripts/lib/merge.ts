@@ -116,7 +116,7 @@ export function mergeThreatModels(analysis: string): void {
   let names: string[] = [];
   try { names = readdirSync(dir).filter((n) => n.endsWith(".md")).sort(); } catch { return; }
   if (!names.length) return;
-  const parts = ["# Threat model", "", "Merged deterministically from `threat/*.md` (one threat-modeler per component). Repository-derived content; claims are cited `file:line`.", ""];
+  const parts = ["# Threat model", "", "Merged deterministically from `threat/*.md` (one whole-system threat-modeler). Repository-derived content; claims are cited `file:line`.", ""];
   for (const n of names) parts.push(`## ${n.replace(/\.md$/, "")}`, "", (readText(join(dir, n)) ?? "").trim(), "");
   writeText(join(analysis, "THREAT_MODEL.md"), parts.join("\n") + "\n");
 }

@@ -134,7 +134,7 @@ test("every headless stage skill forbids ad-hoc scripts (a missing CLI command s
   for (const st of HEADLESS) assert.match(read(`skills/review-${st}/SKILL.md`), /Never write or run ad-hoc scripts; if a step seems to need one, stop and report it\./, st);
   // The map stage merges analyst fragments through the CLI and never writes topology.json itself.
   const map = read("skills/review-map/SKILL.md");
-  assert.match(map, /fragments\/<module>\.json/);
+  assert.match(map, /fragments\/<unit>\.json/);
   assert.match(map, /`R merge-topology \$ARGUMENTS`/);
 });
 

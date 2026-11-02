@@ -8,6 +8,13 @@
 - The per-unit compact threshold (`COMPACT_LOC`) now applies to the security stage only.
 - Shard keys still name every dimension they cover, so a lost shard still marks each of them "not fully covered".
 
+**Changed — the same rule for every other fan-out**
+- Security: one whole-system threat model (`threat/system.md`, mapping trust handed across modules) instead of one per unit, and one all-category auditor per unit instead of one per unit × category. `--effort high` restores one auditor per category on units of 1,000+ lines and the cross-boundary sweep. A 20-unit repo goes from ~103 security agents to ~21–23.
+- Map: `suggest-modules` now also prints `units` (candidates packed into 8,000–25,000-line map units); the map skill starts one analyst per unit, never per module. A small repo gets one analyst.
+- Verify: findings are batched per review unit (up to 5 per agent and lens) instead of per file, so files with one finding each no longer cost one agent each. Batch keys are `sec|oth--<unit>[-n]--<lens>`; tasks carry `files`.
+- Consolidate: one consolidator per review unit decides up to 8 co-located groups, each into its own `consolidate/<group>.json`; the guard finds batched groups in the plan.
+- Architecture: the stage runs one critic that builds on the deep stage's verified whole-system findings instead of re-reviewing the code.
+
 ## 2.1.0
 
 **Fixed — long sharded batches lost most of their shards, then the retry spent the budget again**

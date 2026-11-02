@@ -38,6 +38,17 @@ export function suggestModules(analysis: string): { name: string; path: string; 
   return out;
 }
 
+// Map units: the map stage reads for structure, not defects, so one analyst can
+// cover far more code than a reviewer. Candidates are packed into units of at
+// least MAP_MIN_LOC (never past MAP_MAX_LOC); a small repo gets one analyst.
+export const MAP_MIN_LOC = 8000;
+export const MAP_MAX_LOC = 25000;
+
+export function suggestMapUnits(analysis: string): { modules: ReturnType<typeof suggestModules>; units: ReviewUnit[] } {
+  const modules = suggestModules(analysis);
+  return { modules, units: packUnits(modules, undefined, { min: MAP_MIN_LOC, max: MAP_MAX_LOC }) };
+}
+
 // Review units: the topology's modules packed into shards worth one agent each.
 // A map may legitimately name a module per file (good for the architecture
 // report), but sharding 14 tiny modules x 7 dimensions spends one agent's fixed

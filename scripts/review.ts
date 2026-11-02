@@ -19,7 +19,7 @@ import { renderDeck } from "./lib/report-deck.ts";
 import { checkFresh, finaliseRevision, stampRevision } from "./lib/revision.ts";
 import { runScanners } from "./lib/scanners.ts";
 import { writeStatus } from "./lib/status.ts";
-import { suggestModules } from "./lib/modules.ts";
+import { suggestMapUnits } from "./lib/modules.ts";
 import { mergeTopology } from "./lib/topology.ts";
 import { runDriver } from "./lib/run.ts";
 import { watchRun } from "./lib/progress.ts";
@@ -139,8 +139,8 @@ export const COMMANDS: Record<string, Cmd> = {
     },
   },
   "suggest-modules": {
-    usage: "suggest-modules <name>   (deterministic module candidates from evidence; oversized dirs split)",
-    run: (pos) => { const { analysis } = scopeOrDie(pos[0]); console.log(JSON.stringify(suggestModules(analysis), null, 2)); return 0; },
+    usage: "suggest-modules <name>   (deterministic module candidates from evidence, oversized dirs split, packed into map units: one analyst each)",
+    run: (pos) => { const { analysis } = scopeOrDie(pos[0]); console.log(JSON.stringify(suggestMapUnits(analysis), null, 2)); return 0; },
   },
   "merge-topology": {
     usage: "merge-topology <name>   (map stage: fragments/*.json -> topology.json; dedupes modules, drops uncited edges, SLOC from evidence)",

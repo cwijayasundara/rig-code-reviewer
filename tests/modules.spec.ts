@@ -42,3 +42,23 @@ test("packUnits: evidence SLOC outranks the map's own line counts", () => {
   const u = packUnits([{ name: "a", path: "src/a", lines: 10 }, { name: "b", path: "src/b", lines: 10 }], { "src/a/x.py": 3000, "src/b/y.py": 20 });
   assert.deepEqual(u.map((x) => x.modules), [["a"], ["b"]]);
 });
+
+test("map units: suggested modules are packed for the map stage, so a small repo gets one analyst", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { put } = await import("./testkit.ts");
+  const { suggestMapUnits, MAP_MAX_LOC } = await import("../scripts/lib/modules.ts");
+  const a = mkdtempSync(join(tmpdir(), "mapunits-"));
+  const file_sloc: Record<string, number> = {};
+  for (let i = 0; i < 12; i++) file_sloc[`src/m${i}/x.py`] = 600;
+  put(a, "evidence.json", { files: Object.keys(file_sloc), file_sloc });
+  let r = suggestMapUnits(a);
+  assert.equal(r.modules.length > 1, true);
+  assert.equal(r.units.length, 1, "7,200 lines across 12 modules: one analyst");
+  for (let i = 0; i < 60; i++) file_sloc[`lib/d${i}/y.py`] = 1000;
+  put(a, "evidence.json", { files: Object.keys(file_sloc), file_sloc });
+  r = suggestMapUnits(a);
+  assert.ok(r.units.length < r.modules.length / 4, `${r.units.length} units for ${r.modules.length} modules`);
+  assert.ok(r.units.every((u) => u.lines <= MAP_MAX_LOC));
+});
