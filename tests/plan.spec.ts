@@ -21,7 +21,7 @@ function review(dims = "quality,performance,security", modules = 3, lines = 4000
 }
 
 test("deep plan: one code-local reviewer per unit, cap defers (named) instead of dropping, resume skips done shards", () => {
-  const { a } = review("quality,performance,testing,security", 5);
+  const { a } = review("quality,performance,testing", 5);
   let p = buildPlan(a, "deep", { maxAgents: 3 });
   assert.equal(p.run.length, 3);
   assert.equal(p.deferred.length, 2);
@@ -70,12 +70,12 @@ test("compact mode: a small unit gets one all-dimension reviewer and one all-cat
   const { a } = review("quality,performance,testing,security", 1, 300);
   put(a, "topology.json", { modules: [{ name: "core", path: "src", lines: 300 }], edges: [] });
   const deep = buildPlan(a, "deep");
-  assert.deepEqual(deep.run.map((t) => [t.key, t.agent]), [["quality+performance+testing--core", "module-reviewer"]]);
+  assert.deepEqual(deep.run.map((t) => [t.key, t.agent]), [["threat--system", "threat-modeler"], ["quality+performance+testing--core", "module-reviewer"]], "security in scope: deep maps the threat model");
   const sec = buildPlan(a, "security");
   assert.deepEqual(sec.run.map((t) => t.key), ["threat--system", "core--all-categories"], "one unit owning every file: no sweeps");
   // A big unit still gets one deep reviewer and, below high effort, one security auditor.
   put(a, "topology.json", { modules: [{ name: "core", path: "src", lines: COMPACT_LOC }], edges: [] });
-  assert.equal(buildPlan(a, "deep").run.length, 1);
+  assert.equal(buildPlan(a, "deep").run.filter((t) => t.agent !== "threat-modeler").length, 1);
   assert.equal(buildPlan(a, "security").run.filter((t) => t.agent === "security-auditor").length, 1);
   // Files no module owns bring back the outside-components and secrets sweeps.
   put(a, "evidence.json", { languages: { Python: { files: 2, lines: 7 } }, files: ["src/app.py", "deploy/run.sh"] });
@@ -99,7 +99,7 @@ test("verify plan never splits a 3-lens panel across the cap, and batches per re
   const { a } = review("security", 2);
   const f = (id: string, sev: string, dim: string, file: string) => ({ id, dimension: dim, severity: sev, confidence: "high", file, line: 4, title: "t", evidence: "e", impact: "i", recommendation: "r", effort: "S", fingerprint: `v1:${id}`, category: "CWE-89", reporters: 1, shards: [] });
   put(a, "findings.json", { version: 1, findings: [
-    f("SEC-00000001", "High", "security", "src/m0/a.py"), f("SEC-00000002", "Low", "security", "src/m0/b.py"),
+    f("SEC-00000001", "High", "security", "src/m0/a.py"), f("SEC-00000002", "Medium", "security", "src/m0/b.py"),
     f("SEC-00000003", "Medium", "security", "src/m1/c.py"), f("QUA-00000004", "Medium", "quality", "src/m0/a.py"),
   ] });
   const p = buildPlan(a, "verify", { maxAgents: 4 });
@@ -220,15 +220,15 @@ test("sticky final never passes off new unverified findings as verified", async 
 test("deep/security plans shard per review unit: tiny modules are packed and the brief names every module", () => {
   const { a } = review("quality,security", 4, 50);
   const deep = buildPlan(a, "deep");
-  assert.equal(deep.run.length, 1, "4 modules x 1 dimension packed into one unit");
+  assert.equal(deep.run.filter((t) => t.agent !== "threat-modeler").length, 1, "4 modules x 1 dimension packed into one unit");
   assert.match(deep.estimate.formula, /4 modules packed into 1 review units/);
-  assert.deepEqual(deep.run[0]!.input.modules, ["m0", "m1", "m2", "m3"]);
+  assert.deepEqual(deep.run.find((t) => t.agent !== "threat-modeler")!.input.modules, ["m0", "m1", "m2", "m3"]);
   const sec = buildPlan(a, "security");
   assert.equal(sec.run.filter((t) => t.agent === "threat-modeler").length, 1);
   const audit = sec.run.find((t) => t.agent === "security-auditor" && t.input.category)!;
   assert.equal(audit.input.threat, "threat/system.md");
   writeBriefs(a, "/src", deep);
-  const brief = readFileSync(join(a, `briefs/deep/${deep.run[0]!.key}.md`), "utf8");
+  const brief = readFileSync(join(a, `briefs/deep/${deep.run.find((t) => t.agent !== "threat-modeler")!.key}.md`), "utf8");
   assert.match(brief, /modules m0, m1, m2, m3 \(paths: src\/m0, src\/m1, src\/m2, src\/m3/);
 });
 

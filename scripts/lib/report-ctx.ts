@@ -26,6 +26,7 @@ export interface Ctx {
   needsHuman: Finding[];
   refuted: Finding[];
   deferred: Finding[];
+  unverified: Finding[];
   pending: Finding[];
   pluginVersion: string;
 }
@@ -68,6 +69,7 @@ export function loadCtx(analysis: string, pluginVersion = "2.1.0"): Ctx {
     needsHuman: by("needs-human").filter((f) => !f.accepted),
     refuted: by("refuted"),
     deferred: by("deferred"),
+    unverified: by("unverified").filter((f) => !f.accepted),
     pending: findings.filter((f) => !f.verdict),
     pluginVersion,
   };
@@ -132,7 +134,7 @@ export function noneLine(c: Ctx, dimension: string, what = "confirmed findings")
 export function counts(c: Ctx) {
   return {
     total: c.findings.length, confirmed: c.confirmed.length, accepted: c.accepted.length,
-    needs_human: c.needsHuman.length, refuted: c.refuted.length, deferred: c.deferred.length, pending: c.pending.length,
+    needs_human: c.needsHuman.length, refuted: c.refuted.length, deferred: c.deferred.length, unverified: c.unverified.length, pending: c.pending.length,
   };
 }
 

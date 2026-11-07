@@ -70,11 +70,11 @@ Script-owned files (`findings.json`, `coverage.json`, `evidence.json`,
 | scope | scope.json | file valid |
 | preflight | PREFLIGHT.md | exists |
 | assess | evidence.json, REVISION.json, ASSESSMENT.md, raw/scanner/* | all exist |
-| map | topology.json | validates |
-| deep | raw/deep/* per plan/deep.json | every planned shard valid or lost-recorded |
+| map | fragments/* per plan/map.json, topology.json | validates; no deferred map shards |
+| deep | raw/deep/* (and threat/system.md when security is in scope) per plan/deep.json | every planned shard valid or lost-recorded |
 | security | THREAT_MODEL.md, raw/security/* per plan/security.json | same |
 | consolidate | consolidate/* per plan/consolidate.json | every planned group decided (or retried once) |
-| verify | votes/* per plan/verify.json, findings.json | every finding has a verdict |
+| verify | votes/* per plan/verify.json, findings.json | every finding has a verdict (below `verify_min_severity`: `unverified`) |
 | architecture | architecture.json | validates |
 | report | ANALYSIS_NOTES.md + renders | REVISION fresh, renders exist |
 

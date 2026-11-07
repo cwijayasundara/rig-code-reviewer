@@ -43,7 +43,7 @@ test("unit kind is derived from the evidence file list, never from names", () =>
 test("deep: an infra-only unit gets no code-local reviewer; the plan says who covers it", () => {
   const { a } = mixed();
   const p = buildPlan(a, "deep");
-  assert.deepEqual(p.run.map((t) => t.key), ["operability--system", "quality+performance+testing--qa", "quality+performance+testing--api"]);
+  assert.deepEqual(p.run.map((t) => t.key), ["threat--system", "operability--system", "quality+performance+testing--qa", "quality+performance+testing--api"]);
   assert.match(p.estimate.formula, /1 infra-only unit\(s\) \(stack\) left to operability \+ security/);
 });
 

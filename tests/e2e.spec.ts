@@ -114,17 +114,17 @@ test("a batch that loses most of its shards stops without a retry, names the wai
 });
 
 test("budget: a sharded stage the budget clearly cannot finish stops before spending; a tight one warns and runs", () => {
-  // Stub stages cost $0.01; three before deep. Deep plans one compact task at the $0.45 default.
+  // Stub stages cost $0.01; two before map, the first sharded stage. Map plans one unit at the $0.80 default.
   const src = repo();
   const r = cli(["run", "sb", "--source", src, "--runner", STUB, "--offline", "--dimensions", "quality", "--max-usd", "0.3"]);
   assert.equal(r.code, 4, r.out + r.err);
-  assert.match(r.err, /stopping before deep: deep needs ~\$0\.45 for 1 task\(s\) \(~\$0\.45 each\) and \$0\.27 of the \$0\.3 budget is left; nothing was spent on it/);
+  assert.match(r.err, /stopping before map: map needs ~\$0\.80 for 1 task\(s\) \(~\$0\.80 each\) and \$0\.28 of the \$0\.3 budget is left; nothing was spent on it/);
   assert.match(r.err, /--max-usd 5 or more/);
-  assert.doesNotMatch(r.out, /==> deep/);
+  assert.doesNotMatch(r.out, /==> map/);
   const src2 = repo();
-  const w = cli(["run", "sw", "--source", src2, "--runner", STUB, "--offline", "--dimensions", "quality", "--max-usd", "0.4"]);
-  assert.match(w.out, /warning: deep needs ~\$0\.45 .* the run will likely stop inside this stage/);
-  assert.match(w.out, /==> deep/);
+  const w = cli(["run", "sw", "--source", src2, "--runner", STUB, "--offline", "--dimensions", "quality", "--max-usd", "0.6"]);
+  assert.match(w.out, /warning: map needs ~\$0\.80 .* the run will likely stop inside this stage/);
+  assert.match(w.out, /==> map/);
 });
 
 test("budget: the driver stops before a stage once --max-usd is spent", () => {

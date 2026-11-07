@@ -83,6 +83,13 @@ export function mergeTopology(analysis: string): TopologyMerge {
   try { names = readdirSync(dir).filter((n) => n.endsWith(".json")).sort(); } catch { /* none */ }
   const invalid: string[] = [];
   const frags: unknown[] = [];
+  // A planned map merges only the fragments its plan names, so files left by an earlier,
+  // differently-sliced map cannot add duplicate modules (and with them duplicate shards).
+  const plan = readJson<{ run?: { out: string }[]; skipped?: string[]; deferred?: string[] } | null>(join(analysis, "plan", "map.json"), null);
+  if (plan) {
+    const planned = new Set([...(plan.run ?? []).map((t) => t.out.replace(/^fragments\//, "")), ...[...(plan.skipped ?? []), ...(plan.deferred ?? [])].map((k) => `${k}.json`)]);
+    names = names.filter((n) => planned.has(n));
+  }
   for (const n of names) {
     const f = readJson<unknown>(join(dir, n), undefined);
     if (isObj(f)) frags.push(f); else invalid.push(n);

@@ -25,8 +25,8 @@ switch (stage) {
   case "preflight": put("PREFLIGHT.md", "# Preflight\nPython, no build. Execution: not run.\n"); break;
   case "assess": put("ASSESSMENT.md", "# Assessment\nOne module, src/app.py:2 entry.\n"); break;
   case "map": {
-    // One analyst fragment, then the script merges it (the skill never writes topology.json).
-    put("fragments/core.json", { modules: [{ name: "core", path: "src", lines: 999 }], edges: [], entry_points: [{ name: "run", kind: "function", file: "src/app.py", line: 2 }], data_stores: [{ name: "db", kind: "sql", evidence: "src/app.py:4" }], externals: [], flows: [], observations: [] });
+    // One analyst per planned map unit writes its fragment, then the script merges them (the skill never writes topology.json).
+    for (const [key] of args("map").tasks) put(`fragments/${key}.json`, { modules: [{ name: "core", path: "src", lines: 999 }], edges: [], entry_points: [{ name: "run", kind: "function", file: "src/app.py", line: 2 }], data_stores: [{ name: "db", kind: "sql", evidence: "src/app.py:4" }], externals: [], flows: [], observations: [] });
     const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", CLI, "merge-topology", name], { encoding: "utf8", env: process.env });
     if (r.status !== 0) { process.stderr.write(r.stdout + r.stderr); process.exit(1); }
     break;
@@ -40,7 +40,10 @@ switch (stage) {
       process.stderr.write("Background tasks still running after 600000ms were stopped (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS)\n");
       break;
     }
-    args("deep").tasks.forEach(([key], i) => {
+    let first = true;
+    args("deep").tasks.forEach(([key, agent]) => {
+      if (agent === "threat-modeler") { put(`threat/${key.replace(/^threat--/, "")}.md`, "Entry: src/app.py:2 (external caller)."); return; }
+      const i = first ? 0 : 1; first = false;
       if (i === 0 && process.env.STUB_LOSE_ONCE === "1" && !existsSync(marker)) { writeFileSync(marker, "1"); return; }
       put(`raw/deep/${key}.json`, { shard: key, filesRead: ["src/app.py"], notReached: [], findings: /^(quality|[a-z+]*\+quality)(\+|--)/.test(key) ? [swallow] : [] });
     });

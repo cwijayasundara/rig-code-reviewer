@@ -1,9 +1,9 @@
 export const meta = {
   name: "review-tasks",
   description: "Run a code-review stage plan: one read-only specialist agent per task, each following a script-written brief and writing its own validated output file",
-  whenToUse: "Run by the review-deep / review-security / review-verify skills with args from <analysis>/plan/<stage>.workflow-args.json: { stage, sourceDir, analysisDir, tasks: [[key, agent], ...] }.",
+  whenToUse: "Run by the review-map / review-deep / review-security / review-consolidate / review-verify skills with args from <analysis>/plan/<stage>.workflow-args.json: { stage, sourceDir, analysisDir, tasks: [[key, agent], ...] }.",
   phases: [
-    { title: "Threat model", detail: "security stage only: one whole-system threat-modeler, before the auditors" },
+    { title: "Threat model", detail: "security stage, only when deep did not already map it: one whole-system threat-modeler, before the auditors" },
     { title: "Run", detail: "one agent per planned task; outputs are files validated by hook and merged by script" },
   ],
 };
@@ -48,8 +48,11 @@ function dispatch(t, phaseName) {
   );
 }
 
-const first = tasks.filter((t) => /threat-modeler$/.test(t.agent));
-const rest = tasks.filter((t) => !/threat-modeler$/.test(t.agent));
+// Only the security stage waits for its threat model; in the deep stage (where it is
+// planned whenever security is in scope) it runs beside the other reviewers.
+const barrier = a.stage === "security";
+const first = barrier ? tasks.filter((t) => /threat-modeler$/.test(t.agent)) : [];
+const rest = tasks.filter((t) => !first.includes(t));
 log(`${a.stage}: ${tasks.length} task(s)` + (first.length ? ` (${first.length} threat model(s) first)` : "") + (a.deferred ? ` · ${a.deferred} deferred by the agent cap (named in plan/${a.stage}.json)` : ""));
 
 // Threat models must exist before the sweep reads them: a genuine barrier.

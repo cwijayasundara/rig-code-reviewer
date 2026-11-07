@@ -3,8 +3,8 @@
 // Roles:
 //   main          the finders: deep-review specialists, threat modeler, security auditor, consolidator
 //   evaluator     the verifiers that confirm or refute every finding (keep it a different tier from main)
-//   writer        the prose stages: preflight, assess, map, architecture, report
-//   orchestrator  the dispatch-only stages: deep, security, consolidate, verify (they run the plan, not the review)
+//   writer        the prose stages: preflight, assess, architecture, report
+//   orchestrator  the dispatch-only stages: map, deep, security, consolidate, verify (they run the plan, not the review)
 //
 // Sources, later wins: built-in defaults < <source>/.code-review/config.json < --config <file>.
 // A role left out keeps its default; `writer` follows `main.model` when only main is set.
@@ -25,7 +25,7 @@ export interface ModelConfig {
 }
 
 export const EVALUATOR_AGENTS = ["finding-verifier", "security-verifier"] as const;
-const WRITER_STAGES: Stage[] = ["preflight", "assess", "map", "architecture", "report"];
+const WRITER_STAGES: Stage[] = ["preflight", "assess", "architecture", "report"];
 
 /** Built-in defaults for the stage processes. Agent defaults are their frontmatter (main: sonnet, evaluator: opus). */
 export const DEFAULTS = {

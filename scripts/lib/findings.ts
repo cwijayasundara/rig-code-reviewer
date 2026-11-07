@@ -8,6 +8,7 @@ import { hasSecret } from "./redact.ts";
 import {
   CONFIDENCES, CONF_RANK, CORE_FIELDS, CORRECTABLE, DIM_PREFIX, DIMENSIONS, EFFORTS, LENSES, SEVERITIES,
   type Accepted, type Confidence, type Correction, type Finding, type Plan, type RawFinding, type RawShard, type Severity, type Vote,
+  SEV_RANK,
 } from "./types.ts";
 import { exists, readJson, readText, sha256 } from "./util.ts";
 
@@ -90,9 +91,13 @@ export function listJson(dir: string): string[] {
   return out;
 }
 
-export interface LoadedShards { shards: (RawShard & { path: string })[]; invalid: { path: string; errors: string[] }[] }
+export interface LoadedShards { shards: (RawShard & { path: string; capped?: { filed: number; kept: number } })[]; invalid: { path: string; errors: string[] }[] }
 
-export function loadShards(analysis: string, source?: string): LoadedShards {
+/**
+ * Agent shards (not scanner output) past `cap` keep their most severe, most confident
+ * findings; the shard records how many it filed so coverage can say what was dropped.
+ */
+export function loadShards(analysis: string, source?: string, cap?: number): LoadedShards {
   const shards: LoadedShards["shards"] = [];
   const invalid: LoadedShards["invalid"] = [];
   for (const p of listJson(join(analysis, "raw"))) {
@@ -100,6 +105,12 @@ export function loadShards(analysis: string, source?: string): LoadedShards {
     const errors = obj === undefined ? ["invalid JSON"] : validateShard(obj, source);
     if (errors.length) { invalid.push({ path: p, errors }); continue; }
     const s = (Array.isArray(obj) ? { shard: p, filesRead: [], notReached: [], findings: obj } : obj) as RawShard;
+    const agent = !p.includes("/raw/scanner/");
+    if (agent && cap && s.findings.length > cap) {
+      const kept = [...s.findings].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || CONF_RANK[a.confidence] - CONF_RANK[b.confidence]).slice(0, cap);
+      shards.push({ ...s, findings: kept, path: p, capped: { filed: s.findings.length, kept: cap } });
+      continue;
+    }
     shards.push({ ...s, path: p });
   }
   return { shards, invalid };
@@ -240,10 +251,17 @@ function applyCorrections(out: Finding, confirming: Vote[]): void {
   }
 }
 
-export function applyVotes(f: Finding, votes: Vote[], opts: { deferred: boolean; final: boolean }): Finding {
+export function applyVotes(f: Finding, votes: Vote[], opts: { deferred: boolean; final: boolean; floor?: Severity }): Finding {
   const out: Finding = { ...f, original_severity: f.severity };
   delete out.verdict;
   delete out.corrections; // recomputed from the current votes on every merge
+  // Below the review's verification floor and never voted on: reported as filed, not judged.
+  // Votes already on disk (a floor raised after verifying) still count.
+  if (opts.floor && !votes.length) {
+    out.verdict = "unverified";
+    out.verifier_note = `not verified: below the verification floor (${opts.floor}); reported as filed`;
+    return out;
+  }
   if (f.dimension === "security") {
     const byLens = new Map(votes.filter((v) => (LENSES as readonly string[]).includes(v.lens)).map((v) => [v.lens, v]));
     const vs = [...byLens.values()];

@@ -2,15 +2,18 @@
 // construction). Deterministic work (evidence, plans, merge, render) runs here
 // in the driver; the model stages only write prose and agent shards.
 import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { runMerge } from "./merge.ts";
-import { deactivate, loadScope, resolvePaths } from "./paths.ts";
+import { mergeTopology } from "./topology.ts";
+import { deactivate, loadScope, resolvePaths, within } from "./paths.ts";
 import { buildPlan, markAttempt } from "./plan.ts";
 import { writeBriefs } from "./briefs.ts";
 import { buildStatus, writeStatus } from "./status.ts";
 import { SHARDED, STAGES, type ShardedStage, type Stage } from "./types.ts";
-import { exists, readJson, str, writeJson } from "./util.ts";
+import { exists, readJson, sha256, str, writeJson } from "./util.ts";
 import { checkFresh } from "./revision.ts";
 import { onStreamLine, RunLog } from "./progress.ts";
 import { agentChoice, loadResolved, stageChoice, type ModelConfig } from "./config.ts";
@@ -33,8 +36,25 @@ export function stageArgs(stage: Stage, config: ModelConfig, o: { model?: string
     ...(o.userSettings ? [] : ["--setting-sources", "project,local"])];
 }
 
+/**
+ * Working directory for a stage process: a scratch directory outside the source tree.
+ * Claude Code injects every CLAUDE.md from the working directory upwards into the stage
+ * and into each of its agents, and loads that directory's project settings (hooks
+ * included). Run from inside the code under review, that is the repository's own text,
+ * repeated in every agent's context and able to steer it. The source is attached with
+ * --add-dir instead, which grants access without loading its CLAUDE.md.
+ */
+export function stageCwd(analysis: string, base = tmpdir()): string {
+  const dir = join(base, "code-review-harness", sha256(analysis).slice(0, 16));
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Read-only git subcommands an agent may run against the source with `git -C <source>`. */
+const GIT_READ = ["log", "show", "blame", "diff", "ls-files", "rev-parse", "status", "grep", "shortlog"];
+
 /** Tools a headless stage may use. Bash is limited to read-only commands + this CLI. */
-export function allowedTools(pluginRoot: string): string[] {
+export function allowedTools(pluginRoot: string, source?: string): string[] {
   const cli = `node ${join(pluginRoot, "scripts", "review.ts")}`;
   return [
     "Read", "Glob", "Grep", "Write", "Edit", "Agent", "Workflow", "Skill", "TodoWrite",
@@ -42,6 +62,8 @@ export function allowedTools(pluginRoot: string): string[] {
     "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)", "Bash(git diff:*)", "Bash(git ls-files:*)",
     "Bash(git rev-parse:*)", "Bash(git status:*)", "Bash(git grep:*)", "Bash(git shortlog:*)",
     "Bash(rg:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(ls:*)", "Bash(find:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(cat:*)", "Bash(file:*)",
+    // The stage runs outside the source tree, so git needs -C; only for this source and read-only subcommands.
+    ...(source ? GIT_READ.map((g) => `Bash(git -C ${source} ${g}:*)`) : []),
   ];
 }
 
@@ -247,6 +269,8 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   const maxUsd = str(flags["max-usd"]) ? Number(flags["max-usd"]) : scope.max_usd;
   const runner = str(flags.runner) ?? process.env.REVIEW_RUN_RUNNER ?? "claude";
   const env = stageEnv(process.env, analysis);
+  const cwd = runner === "claude" ? stageCwd(analysis) : source;
+  const attach = [source, ...(within(analysis, source) ? [] : [analysis])];
 
   if (!dry && exists(join(analysis, "REVISION.json")) && !flags.from && !flags.only) {
     const f = checkFresh(analysis, source);
@@ -273,15 +297,15 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
     if (runner === "claude") {
       // stream-json: one event per line while the stage runs, so the terminal,
       // run.log and the dashboard show tool calls and agents as they happen.
-      args.push("--output-format", "stream-json", "--verbose", "--plugin-dir", pluginRoot, "--permission-mode", "default", "--allowedTools", ...allowedTools(pluginRoot));
+      args.push("--output-format", "stream-json", "--verbose", "--plugin-dir", pluginRoot, "--permission-mode", "default", "--add-dir", ...attach, "--allowedTools", ...allowedTools(pluginRoot, source));
       args.push(...pin);
       if (maxUsd !== undefined) args.push("--max-budget-usd", String(Math.max(0.01, maxUsd - spent(analysis))));
     }
-    if (dry) { say(`[dry-run] (cwd=${source}) ${runner} -p ${JSON.stringify(prompt)}${runner === "claude" ? " " + pin.slice(0, 4).join(" ") : ""}`); return 0; }
+    if (dry) { say(`[dry-run] (cwd=${cwd}) ${runner} -p ${JSON.stringify(prompt)}${runner === "claude" ? " " + pin.slice(0, 4).join(" ") : ""}`); return 0; }
     say(`==> ${stage}: fresh process (context-isolated)`);
     log.stage(stage);
     const [bin, ...pre] = runner.split(/\s+/);
-    const child = spawn(bin!, [...pre, ...args], { cwd: source, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin!, [...pre, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let data: Record<string, unknown> | null = null;
     const tracker = denials.get(stage) ?? new DenialTracker();
     denials.set(stage, tracker);
@@ -309,6 +333,14 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   // spawn → one retry of lost shards → merge. The budget is checked before every
   // batch; a stop leaves the remaining work deferred and the resume command runs it.
   // `--allow-deferred` restores a single capped batch and accepts the rest as a gap.
+  // After a batch: the map stage merges its fragments into topology.json; the others
+  // merge shards and votes into findings.json (verify finalises incomplete panels).
+  const settle = (stage: ShardedStage) => {
+    if (stage !== "map") { runMerge(analysis, stage === "verify" ? { final: true } : {}); return; }
+    const r = mergeTopology(analysis);
+    say(`    merge-topology: ${r.fragments} fragment(s) · ${r.modules} module(s) · ${r.edges} edge(s)${r.written ? "" : " · topology.json NOT written"}`);
+    for (const e of r.errors.slice(0, 10)) warn(`    ERROR ${e}`);
+  };
   const runSharded = async (stage: ShardedStage): Promise<number | "budget"> => {
     let lastDeferred = Number.POSITIVE_INFINITY;
     // Shards the last spawn produced, for cost calibration; 0 when the batch was lost wholesale.
@@ -318,7 +350,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
       const plan = buildPlan(analysis, stage, { maxAgents, continueDeferred: true, acceptDeferred: allowDeferred });
       if (!plan.run.length) {
         markAttempt(analysis, stage);
-        runMerge(analysis, stage === "verify" ? { final: true } : {});
+        settle(stage);
         if (batch === 1) say(`--- ${stage}: nothing to run`);
         return 0;
       }
@@ -348,7 +380,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
       let rc = await spawnStage(stage, plan.run.length, produced);
       if (limit.hit) {
         if (attemptsOf(analysis, stage) === before) markAttempt(analysis, stage);
-        runMerge(analysis, stage === "verify" ? { final: true } : {});
+        settle(stage);
         writeStatus(analysis);
         warn(`error: ${limitStop(stage)}`);
         return 1;
@@ -359,7 +391,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
         if (st && st.lost > 0 && (ceiling.hit || systemicLoss(st.lost, st.planned))) {
           // Not retried: the same cause would lose the same shards again. Keep what finished
           // (merge below) and stop; a resume re-plans and runs the lost shards.
-          runMerge(analysis, stage === "verify" ? { final: true } : {});
+          settle(stage);
           writeStatus(analysis);
           const cause = ceiling.hit
             ? `Cause: Claude Code stopped the stage's background agents at its headless wait ceiling (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=${env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS}). Unset it, or set it to 0, before resuming.`
@@ -377,7 +409,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
           if (rc === 0 && attemptsOf(analysis, stage) === b2) markAttempt(analysis, stage);
         }
       }
-      runMerge(analysis, stage === "verify" ? { final: true } : {}); // THREAT_MODEL.md, coverage, findings
+      settle(stage); // THREAT_MODEL.md, coverage, findings
       if (limit.hit) { writeStatus(analysis); warn(`error: ${limitStop(stage)}`); return 1; } // hit during the retry
       if (rc !== 0) return rc;
       if (allowDeferred || !plan.deferred.length) return 0;

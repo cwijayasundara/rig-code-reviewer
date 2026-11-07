@@ -51,7 +51,7 @@ test("end to end: consolidate plan -> decision (validated on write) -> merge fol
   const src = tree({ "src/app.py": APP });
   assert.equal(cli(["init", "c", "--source", src]).code, 0);
   const a = join(src, ".code-review", "c");
-  const raw = (dimension: string, title: string) => ({ dimension, severity: "Low", confidence: "high", file: "src/app.py", line: 5, title, evidence: "src/app.py:5", impact: "i", recommendation: "r", effort: "S" });
+  const raw = (dimension: string, title: string) => ({ dimension, severity: "Medium", confidence: "high", file: "src/app.py", line: 5, title, evidence: "src/app.py:5", impact: "i", recommendation: "r", effort: "S" });
   put(a, "raw/deep/operability--core.json", { shard: "operability--core", filesRead: [], notReached: [], findings: [raw("operability", "Errors swallowed")] });
   put(a, "raw/deep/quality--core.json", { shard: "quality--core", filesRead: [], notReached: [], findings: [raw("quality", "Exception ignored")] });
   runMerge(a);

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { applyConsolidation } from "./consolidate.ts";
 import { applyVotes, loadAccepted, loadShards, loadVotes, mergeShards, verifyDeferred } from "./findings.ts";
 import { loadScope } from "./paths.ts";
-import { taskOuts, type Finding, type Plan } from "./types.ts";
+import { belowVerifyFloor, DEFAULT_MAX_FINDINGS, DEFAULT_VERIFY_MIN, taskOuts, type Finding, type Plan } from "./types.ts";
 import { exists, readJson, readText, writeJson, writeText } from "./util.ts";
 import { readdirSync } from "node:fs";
 
@@ -25,7 +25,7 @@ export function runMerge(analysis: string, opts: { final?: boolean } = {}): Merg
   const prev = readJson<{ final?: boolean; findings?: Finding[] }>(join(analysis, "findings.json"), {});
   const scope = loadScope(analysis);
   if (!scope) throw new Error(`no scope.json in ${analysis} — run /code-review-harness:review first`);
-  const { shards, invalid } = loadShards(analysis, scope.source);
+  const { shards, invalid } = loadShards(analysis, scope.source, scope.max_findings_per_shard ?? DEFAULT_MAX_FINDINGS);
   const pre = mergeShards(shards, scope.source);
   const cons = applyConsolidation(pre, analysis);
   const merged = cons.findings;
@@ -38,14 +38,14 @@ export function runMerge(analysis: string, opts: { final?: boolean } = {}): Merg
   const findings: Finding[] = merged.map((f) => {
     const aliasIds = (f.aliases ?? []).map((a) => `${f.id.split("-")[0]}-${a.slice(3, 11)}`);
     const vs = votes.get(f.id) ?? aliasIds.map((i) => votes.get(i)).find((x) => x && x.length) ?? [];
-    const out = applyVotes(f, vs, { deferred: deferred.has(f.id), final });
+    const out = applyVotes(f, vs, { deferred: deferred.has(f.id), final, floor: belowVerifyFloor(f.severity, scope.verify_min_severity) ? scope.verify_min_severity ?? DEFAULT_VERIFY_MIN : undefined });
     const acc = accepted.get(f.fingerprint) ?? (f.aliases ?? []).map((a) => accepted.get(a)).find(Boolean);
     return acc ? { ...out, accepted: acc } : out;
   });
   writeJson(join(analysis, "findings.json"), { version: 1, final, findings });
   writeJson(join(analysis, "coverage.json"), buildCoverage(analysis, shards, invalid));
   mergeThreatModels(analysis);
-  const by_verdict: Record<string, number> = { confirmed: 0, refuted: 0, "needs-human": 0, deferred: 0, pending: 0 };
+  const by_verdict: Record<string, number> = { confirmed: 0, refuted: 0, "needs-human": 0, deferred: 0, unverified: 0, pending: 0 };
   for (const f of findings) by_verdict[f.verdict ?? "pending"]! += 1;
   return { findings: findings.length, by_verdict, invalid_shards: invalid, invalid_votes: [...badVotes, ...cons.invalid], consolidated: cons.merged };
 }
@@ -64,7 +64,7 @@ interface Evidence {
   top_level_dirs?: { dir: string; files: number; kind?: string }[];
 }
 
-export function buildCoverage(analysis: string, shards: { shard: string; filesRead: string[]; notReached: string[] }[], invalid: { path: string }[]) {
+export function buildCoverage(analysis: string, shards: { shard: string; filesRead: string[]; notReached: string[]; capped?: { filed: number; kept: number } }[], invalid: { path: string }[]) {
   const scope = loadScope(analysis);
   const ev = readJson<Evidence>(join(analysis, "evidence.json"), {});
   const topo = readJson<{ modules?: { name: string; path?: string }[] }>(join(analysis, "topology.json"), {});
@@ -107,6 +107,7 @@ export function buildCoverage(analysis: string, shards: { shard: string; filesRe
       skipped: scanners.filter((s) => s.status === "skipped").map((s) => s.id),
     },
     not_reached: [...notReached].sort().slice(0, 500),
+    capped_shards: shards.filter((s) => s.capped).map((s) => ({ shard: s.shard, filed: s.capped!.filed, kept: s.capped!.kept })),
   };
 }
 
@@ -125,5 +126,5 @@ export function mergeThreatModels(analysis: string): void {
 export function preConsolidation(analysis: string): Finding[] {
   const scope = loadScope(analysis);
   if (!scope) return [];
-  return mergeShards(loadShards(analysis, scope.source).shards, scope.source);
+  return mergeShards(loadShards(analysis, scope.source, scope.max_findings_per_shard ?? DEFAULT_MAX_FINDINGS).shards, scope.source);
 }

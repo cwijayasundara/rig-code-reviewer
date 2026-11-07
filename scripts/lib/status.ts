@@ -25,7 +25,7 @@ export function buildStatus(analysis: string) {
   const findings = readJson<{ findings?: Finding[] }>(join(analysis, "findings.json"), {}).findings ?? [];
   const topo = readJson<{ modules?: { name: string; lines?: number }[] } | null>(join(analysis, "topology.json"), null);
   const arch = readJson<unknown>(join(analysis, "architecture.json"), null);
-  const plans = { deep: planState(analysis, "deep"), security: planState(analysis, "security"), consolidate: planState(analysis, "consolidate"), verify: planState(analysis, "verify") };
+  const plans = { map: planState(analysis, "map"), deep: planState(analysis, "deep"), security: planState(analysis, "security"), consolidate: planState(analysis, "consolidate"), verify: planState(analysis, "verify") };
   const dims = scope?.dimensions ?? [];
   const wantsSecurity = dims.includes("security");
   const wantsDeep = dims.some((d) => d !== "security");
@@ -42,7 +42,7 @@ export function buildStatus(analysis: string) {
     scope: !!scope,
     preflight: exists(join(analysis, "PREFLIGHT.md")),
     assess: ["evidence.json", "REVISION.json", "ASSESSMENT.md"].every((f) => exists(join(analysis, f))),
-    map: !!topo && validateTopology(topo).length === 0,
+    map: !!topo && validateTopology(topo).length === 0 && settled(plans.map),
     deep: !wantsDeep || sharded(plans.deep),
     security: !wantsSecurity || (sharded(plans.security) && exists(join(analysis, "THREAT_MODEL.md"))),
     consolidate: sharded(plans.consolidate),
@@ -60,7 +60,7 @@ export function buildStatus(analysis: string) {
   });
   const next = stages.find((s) => s.status === "pending");
 
-  const by_verdict: Record<string, number> = { confirmed: 0, refuted: 0, "needs-human": 0, deferred: 0, pending: 0 };
+  const by_verdict: Record<string, number> = { confirmed: 0, refuted: 0, "needs-human": 0, deferred: 0, unverified: 0, pending: 0 };
   const by_severity: Record<string, number> = {};
   const by_dimension: Record<string, number> = {};
   // Security candidates per category and CWE: the security stage reports these, so the

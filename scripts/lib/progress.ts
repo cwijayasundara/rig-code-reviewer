@@ -117,6 +117,17 @@ export function onStreamLine(line: string, log: RunLog): Record<string, unknown>
 export const WATCH_LINE = /==> |--- |error|warning|stopping|retrying|lost|usage: |open: |=== review-run /i;
 
 /**
+ * Whether `watch` forwards a run.log line. Every forwarded line wakes the chat session
+ * that armed the Monitor for a full turn, so tool-call lines, the stage process's own
+ * stderr (\`    ! …\`, which echoes whatever the model's tools printed) and the per-stage
+ * "gate passes, skipping" lines of a resume stay in run.log only.
+ */
+export function watchable(l: string): boolean {
+  // Indented lines are tool calls (·), subagent activity (↳) and stage stderr (!); match any indent.
+  return WATCH_LINE.test(l) && !/^\S+ {2,}(· |↳ |! )/.test(l) && !/gate passes, skipping/.test(l);
+}
+
+/**
  * `review.ts watch`: follow run.log from the start of the latest run and print
  * only WATCH_LINE lines, so a chat Monitor sees each stage start/finish. Exits 0
  * when the run ends (progress.json leaves "running"), 3 if the driver process
@@ -138,7 +149,7 @@ export async function watchRun(analysis: string, maxMinutes = 28): Promise<numbe
     offset = buf.length;
     const parts = text.split("\n");
     carry = parts.pop() ?? "";
-    for (const l of parts) if (WATCH_LINE.test(l) && !/^\S+ {4}(· |  ↳ )/.test(l)) console.log(l);
+    for (const l of parts) if (watchable(l)) console.log(l);
   };
   for (;;) {
     drain();

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+**Fixed — stages no longer run inside the code under review**
+- Stage processes ran with the source tree as working directory, so Claude Code injected the reviewed repository's `CLAUDE.md` into every stage and every agent (repeated tokens, and text able to steer reviewers) and loaded its `.claude/` project settings, hooks included. Each stage now starts in a per-review scratch directory under the system temp dir and attaches the source (and an `--out` analysis dir) with `--add-dir`, which grants access without loading its `CLAUDE.md`. The allowlist gains read-only `git -C <source> log|show|blame|diff|ls-files|rev-parse|status|grep|shortlog`; briefs, agents and skills say to use absolute paths. `begin` also prints the source root.
+- `watch` forwarded every log line containing "error", "lost" or "warning", including tool-call lines (its indentation filter was off by one space, so `Read src/error_handler.py` woke the chat session). Tool calls, subagent activity, stage stderr and resume "gate passes" lines now stay in `run.log`.
+
+**Changed — less waiting**
+- The threat model is planned in the deep stage whenever security is in scope, beside the deep reviewers; the security stage finds it done and its auditors start at once. If it is lost there, security plans it again. The workflow only holds auditors back for a threat model in the security stage.
+- Auditors Grep the threat map for their own modules instead of reading it whole; the threat modeler writes one `### <module>` heading per module. Whole-system agents (threat model, architecture/dependencies/operability/data) start from `review.ts digest` instead of the raw JSON.
+- Default `--max-agents` 24 → 100. A workflow already runs at most ~16 agents at once and queues the rest, so a smaller batch added no cost control, only a wait for its slowest agent before the next batch. Existing reviews keep their saved cap.
+
+**Changed — map is a planned stage**
+- The map orchestrator used to write each analyst's prompt by hand, with no file list, no resume and no estimate. `plan map` now packs the candidates into map units, writes one brief per unit (candidate modules, files, output contract) and skips valid fragments on resume; the driver runs it like the other sharded stages and merges with `merge-topology`. A planned map merges only the fragments its plan names, so leftovers from an older map cannot duplicate modules. The map stage process moves from the writer role to the orchestrator role.
+
+**Added — findings cap per shard**
+- `--max-findings` (saved as `scope.max_findings_per_shard`, default 25). Briefs state it; merge keeps the most severe, most confident findings of an agent shard past the cap (scanner shards are never capped) and records `capped_shards` in coverage, shown in the report and deck gaps.
+
+**Changed — verification by severity**
+- Every open finding, Nits included, went to an evaluator-tier (Opus) verifier, and every security finding to three. Findings filed below the review's verification floor (`--verify-min`, saved as `scope.verify_min_severity`, default `Medium`) are no longer planned for verify; merge marks them with the new verdict `unverified` ("reported as filed"). Reports, the deck and `status` count and list them separately; they never enter the roadmap. Votes already on disk still count. `--verify-min Nit` restores verifying everything.
+
+**Added — `review.ts digest <name> [--limit N]`**
+- The architecture and report stages were told to Read `findings.json`, `evidence.json` and `topology.json` whole. Those grow with the repository and exceed what one Read returns, which leaves the stage scripting around them. `digest` prints one compact view (evidence totals, hotspots, complexity, ownership, modules, edges, entry points, flows, confirmed and needs-human findings, other verdicts counted, coverage), capped lists say how many they left out. Both skills, and the architecture critic, now start from it and Grep the JSON for single records.
+
 **Fixed — agents scripting around missing context, and stages scripting around missing CLI output**
 - Unit briefs pointed agents only at the repo-wide `evidence.json` / `topology.json`, which grow with the repository and can be too large to Read. Agents then sliced them and listed their own files with interpreters and shell loops, which the headless allowlist denies: every denial was a wasted turn at full context. Each unit brief now inlines that unit's files (largest first, up to 150, the rest left to Glob), hotspots, complexity, entry points, edges, data stores and externals. Every brief and every agent now states which Bash forms are denied (interpreters, loops, `cd`, chained or piped commands) and to use Glob/Grep/Read instead.
 - `review-security` asked its orchestrator to report candidates by CWE category, and `review-verify` to list every needs-human finding, but no command printed either, so the stage had to tally files itself. `status` now carries `findings.by_security_category`, `findings.by_cwe` and `findings.needs_human` (also printed in text mode), and the skills point at it.

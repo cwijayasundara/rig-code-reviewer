@@ -5,11 +5,12 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import { validateShard, validateVote } from "./findings.ts";
 import { loadScope } from "./paths.ts";
-import { DIMENSIONS, SYSTEM_DIMENSIONS, LENSES, SEV_RANK, CONF_RANK, taskOuts, type Finding, type Plan, type PlanTask, type ShardedStage } from "./types.ts";
+import { DIMENSIONS, SYSTEM_DIMENSIONS, LENSES, SEV_RANK, CONF_RANK, belowVerifyFloor, DEFAULT_MAX_AGENTS, DEFAULT_VERIFY_MIN, taskOuts, type Finding, type Plan, type PlanTask, type ShardedStage } from "./types.ts";
 import { candidateGroups, validateDecision } from "./consolidate.ts";
 import { preConsolidation } from "./merge.ts";
 import { exists, readJson, writeJson } from "./util.ts";
-import { packUnits, type ReviewUnit } from "./modules.ts";
+import { packUnits, suggestMapUnits, type ReviewUnit } from "./modules.ts";
+import { validateTopology } from "./architecture.ts";
 import { isInfraFile, isTestFile } from "./evidence.ts";
 import type { Scope } from "./types.ts";
 
@@ -36,6 +37,12 @@ export function unitKind(u: ReviewUnit, files: string[]): "code" | "test" | "inf
   return "code";
 }
 
+const THREAT_OUT = "threat/system.md";
+/** The one whole-system threat model (planned by deep when security is in scope, else by security). */
+function threatTask(modules: { name: string; path: string }[]): PlanTask {
+  return { key: "threat--system", agent: "threat-modeler", out: THREAT_OUT, input: { scope: "system", modules: modules.map((m) => m.name), paths: modules.map((m) => m.path) } };
+}
+
 /** Security categories that apply to infrastructure-as-code. */
 const INFRA_CATEGORIES = ["crypto-and-secrets", "config-and-exposure"];
 
@@ -46,7 +53,7 @@ export const AGENT: Record<string, string> = {
 
 // Rough per-agent cost (USD) used only for the up-front estimate; calibrated
 // from usage.json when a previous stage recorded real spend.
-const USD_PER_AGENT = { deep: 0.45, security: 0.6, consolidate: 0.12, verify: 0.4 } as const;
+const USD_PER_AGENT = { map: 0.8, deep: 0.45, security: 0.6, consolidate: 0.12, verify: 0.4 } as const;
 
 /**
  * A review unit under this many source lines gets one security auditor for all
@@ -64,6 +71,9 @@ function outsideFiles(analysis: string, modules: { path: string }[]): string[] {
   if (roots.some((r) => r === "." || r === "")) return [];
   return files.filter((f) => !roots.some((r) => f === r || f.startsWith(r + "/")));
 }
+
+/** The severity a finding was filed at (a panel may since have lowered it). */
+const original = (f: Finding) => f.original_severity ?? f.severity;
 
 /** Findings one verify agent judges together (same review unit, same lens). */
 export const VERIFY_BATCH = 5;
@@ -122,6 +132,7 @@ function shardDone(analysis: string, out: string, source: string): boolean {
   if (obj === undefined) return false;
   if (out.startsWith("votes/")) return validateVote(obj, out.split("/").pop()).length === 0;
   if (out.startsWith("consolidate/")) return validateDecision(obj).length === 0;
+  if (out.startsWith("fragments/")) return validateTopology(obj).length === 0;
   return validateShard(obj, source).length === 0;
 }
 
@@ -140,7 +151,7 @@ export function usdPerAgent(analysis: string, stage: keyof typeof USD_PER_AGENT)
 export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgents?: number; continueDeferred?: boolean; acceptDeferred?: boolean } = {}): Plan {
   const scope = loadScope(analysis);
   if (!scope) throw new Error(`no scope.json in ${analysis}`);
-  const cap = opts.maxAgents ?? scope.max_agents ?? 24;
+  const cap = opts.maxAgents ?? scope.max_agents ?? DEFAULT_MAX_AGENTS;
   const prev = readJson<Plan | null>(join(analysis, "plan", `${stage}.json`), null);
   const topo = readJson<{ modules?: { name: string; path: string; lines?: number }[] }>(join(analysis, "topology.json"), {});
   const modules = (topo.modules ?? []).filter((m) => m && m.name);
@@ -158,12 +169,27 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
   const groups: PlanTask[][] = [];
   const run: PlanTask[] = [], skipped: string[] = [], deferred: string[] = [];
   let formula = "";
-  if (stage === "deep") {
+  if (stage === "map") {
+    // One analyst per map unit (candidate modules packed to MAP_MIN..MAX lines), each
+    // writing fragments/<unit>.json; the driver merges them into topology.json.
+    const { modules: cands, units: mapUnits } = suggestMapUnits(analysis);
+    for (const u of mapUnits) {
+      const key = slug(u.name);
+      const mine = cands.filter((c) => u.modules.includes(c.name)).map((c) => ({ name: c.name, path: c.path, lines: c.lines }));
+      groups.push([{ key, agent: "codebase-analyst", out: `fragments/${key}.json`, input: { ...unitInput(u), candidates: mine } }]);
+    }
+    formula = `${mapUnits.length} map unit(s) x 1 analyst (${cands.length} candidate modules)`;
+  } else if (stage === "deep") {
     const dims = scope.dimensions.filter((d) => d !== "security" && (DIMENSIONS as readonly string[]).includes(d));
     // Whole-system dimensions get one agent each over the entire codebase; judging
     // architecture or dependencies one unit at a time only sees a keyhole and files
     // the same cross-cutting issue once per unit.
     const system = dims.filter((d) => (SYSTEM_DIMENSIONS as readonly string[]).includes(d));
+    // The security stage's threat model needs only the map, so it runs here, beside the
+    // deep reviewers, instead of making every security auditor wait for it. If it is lost
+    // here, the security plan finds threat/system.md missing and runs it there.
+    const threatHere = scope.dimensions.includes("security");
+    if (threatHere) groups.push([threatTask(modules)]);
     for (const d of system) {
       const key = `${d}--system`;
       groups.push([{ key, agent: AGENT[d]!, out: `raw/deep/${key}.json`, input: { scope: "system", dimension: d, modules: modules.map((m) => m.name), paths: modules.map((m) => m.path) } }]);
@@ -183,7 +209,7 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
         ? { key, agent: "module-reviewer", out: `raw/deep/${key}.json`, input: { ...unitInput(u), dimensions: local } }
         : { key, agent: AGENT[local[0]!]!, out: `raw/deep/${key}.json`, input: { ...unitInput(u), dimension: local[0] } }]);
     }
-    formula = `${system.length} whole-system reviewer(s) (${system.join(", ") || "none"}) + ${local.length ? units.length - infra.length : 0} unit(s) x 1 reviewer (${local.join(", ") || "none"})${unitsNote}` +
+    formula = `${threatHere ? "1 whole-system threat model (for security) + " : ""}${system.length} whole-system reviewer(s) (${system.join(", ") || "none"}) + ${local.length ? units.length - infra.length : 0} unit(s) x 1 reviewer (${local.join(", ") || "none"})${unitsNote}` +
       (local.length && infra.length ? `; ${infra.length} infra-only unit(s) (${infra.map((u) => u.name).join(", ")}) left to operability + security` : "");
   } else if (stage === "security") {
     const ev = readJson<{ languages?: Record<string, unknown> }>(join(analysis, "evidence.json"), {});
@@ -193,8 +219,9 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
     // The attack surface is a whole-system question (ways in, trust handed across
     // boundaries), so one threat-modeler maps it once; per-component maps cut every
     // cross-module data flow in half.
-    const threat = "threat/system.md";
-    groups.push([{ key: "threat--system", agent: "threat-modeler", out: threat, input: { scope: "system", modules: modules.map((m) => m.name), paths: modules.map((m) => m.path) } }]);
+    const threat = THREAT_OUT;
+    const mapped = shardDone(analysis, threat, scope.source);
+    groups.push([threatTask(modules)]);
     // Code-local auditing: one auditor per unit works through every category. Only
     // high effort splits a large unit into one auditor per category.
     const allCats = { category: cats.join(", "), focus: cats.map((c) => `${c}: ${SECURITY_CATEGORIES[c as keyof typeof SECURITY_CATEGORIES]}`).join("; ") };
@@ -237,7 +264,7 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
       ...((ownerless && scope.security_effort !== "low") || testOnly.length ? ["secrets-everywhere"] : []),
     ];
     for (const s of sweeps) groups.push([{ key: `sweep--${s}`, agent: "security-auditor", out: `raw/security/sweep--${s}.json`, input: { sweep: s, threat, modules: modules.map((m) => m.path) } }]);
-    formula = `1 whole-system threat model + ${regular} unit(s) x 1 all-category auditor + ${split} unit(s) x ${cats.length} categories (high effort) + ${infraUnits.length} infra-only unit(s) x 1 config/secrets auditor + ${sweeps.length} sweeps${unitsNote}` +
+    formula = `${mapped ? "threat model already mapped (deep stage)" : "1 whole-system threat model"} + ${regular} unit(s) x 1 all-category auditor + ${split} unit(s) x ${cats.length} categories (high effort) + ${infraUnits.length} infra-only unit(s) x 1 config/secrets auditor + ${sweeps.length} sweeps${unitsNote}` +
       (testOnly.length ? `; ${testOnly.length} test-only unit(s) covered by the secrets sweep` : "") +
       (infraSkipped.length ? `; ${infraSkipped.length} infra-only unit(s) not audited (security_effort low covers no config categories)` : "") + (unmanaged ? "" : " (memory-and-unsafe dropped: managed languages only)");
   } else if (stage === "consolidate") {
@@ -257,7 +284,11 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
     formula = `${cands.length} co-located group(s) (same file, lines within 5) in ${chunks.length} batch(es) per review unit x 1 consolidator (≤${CONSOLIDATE_BATCH} groups per agent)`;
   } else {
     const data = readJson<{ findings?: Finding[] }>(join(analysis, "findings.json"), {});
-    const open = (data.findings ?? []).filter((f) => !f.accepted)
+    const all = (data.findings ?? []).filter((f) => !f.accepted);
+    // Findings below the verification floor are reported as "unverified" by merge, not judged.
+    const floor = scope.verify_min_severity ?? DEFAULT_VERIFY_MIN;
+    const below = all.filter((f) => belowVerifyFloor(original(f), floor)).length;
+    const open = all.filter((f) => !belowVerifyFloor(original(f), floor))
       .sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || CONF_RANK[a.confidence] - CONF_RANK[b.confidence] || a.id.localeCompare(b.id));
     // Batched per review unit: one agent per (unit chunk, lens) votes on up to
     // VERIFY_BATCH findings, each into its own votes/<id>--<lens>.json. Every agent
@@ -288,7 +319,8 @@ export function buildPlan(analysis: string, stage: ShardedStage, opts: { maxAgen
       if (c.sec) { sec += ids.length; secAgents += lenses.length; } else { other += ids.length; otherAgents++; }
       if (g.length) groups.push(g);
     }
-    formula = `${sec} security findings in ${secAgents / 3} unit batch(es) x 3 lenses + ${other} other findings in ${otherAgents} unit batch(es) x 1 verifier (≤${VERIFY_BATCH} findings per agent)`;
+    formula = `${sec} security findings in ${secAgents / 3} unit batch(es) x 3 lenses + ${other} other findings in ${otherAgents} unit batch(es) x 1 verifier (≤${VERIFY_BATCH} findings per agent)` +
+      (below ? `; ${below} finding(s) below ${floor} not verified (reported as unverified; --verify-min to change)` : "");
   }
 
   const prevDeferred = new Set(opts.continueDeferred ? [] : prev?.deferred ?? []);

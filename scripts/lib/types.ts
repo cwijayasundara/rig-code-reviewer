@@ -14,7 +14,7 @@ export type Confidence = (typeof CONFIDENCES)[number];
 export const EFFORTS = ["S", "M", "L", "XL"] as const;
 export type Effort = (typeof EFFORTS)[number];
 
-export const VERDICTS = ["confirmed", "refuted", "needs-human", "deferred"] as const;
+export const VERDICTS = ["confirmed", "refuted", "needs-human", "deferred", "unverified"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
 export const LENSES = ["REACHABILITY", "IMPACT", "DEFENSES"] as const;
@@ -29,7 +29,7 @@ export interface Correction { field: Correctable; claim: string; correction: str
 
 export const STAGES = ["scope", "preflight", "assess", "map", "deep", "security", "consolidate", "verify", "architecture", "report"] as const;
 export type Stage = (typeof STAGES)[number];
-export const SHARDED = ["deep", "security", "consolidate", "verify"] as const;
+export const SHARDED = ["map", "deep", "security", "consolidate", "verify"] as const;
 export type ShardedStage = (typeof SHARDED)[number];
 
 /** What an agent (or scanner adapter) writes into raw/<stage>/<shard>.json. */
@@ -110,6 +110,10 @@ export interface Scope {
   baseline?: string;
   /** Review-unit packing [min, max] SLOC, frozen at first init so a resume never re-keys finished shards. */
   unit_loc?: [number, number];
+  /** Least severe finding the verify stage judges; anything below it is reported as "unverified". */
+  verify_min_severity?: Severity;
+  /** Most findings kept per agent shard (most severe first); the excess is recorded in coverage. */
+  max_findings_per_shard?: number;
   created_at: string;
 }
 
@@ -128,6 +132,29 @@ export interface Plan {
 }
 
 export const SEV_RANK: Record<Severity, number> = { Blocker: 0, Critical: 0, High: 1, Medium: 2, Low: 3, Nit: 4 };
+/**
+ * Default verification floor. Every verifier is an evaluator-tier agent and the security
+ * panel is three of them, so verifying Low and Nit findings typically costs more than the
+ * findings are worth; they are reported as filed, marked "unverified". `--verify-min Nit`
+ * verifies everything.
+ */
+export const DEFAULT_VERIFY_MIN: Severity = "Medium";
+/**
+ * Default tasks per batch. A workflow already runs at most ~16 agents at once and queues
+ * the rest, so a small batch adds no cost control, only waits: every batch ends with its
+ * slowest agent, and the next starts after it. Budget is enforced by the up-front stage
+ * projection and the stage process's --max-budget-usd, not by batching.
+ */
+export const DEFAULT_MAX_AGENTS = 100;
+/**
+ * Default most findings one agent shard may file. Every finding is paid for again by
+ * consolidation and verification, so a reviewer that files dozens of minor findings
+ * multiplies downstream cost; past the cap, merge keeps the most severe and records the
+ * shard in coverage. `--max-findings` changes it.
+ */
+export const DEFAULT_MAX_FINDINGS = 25;
+/** True when a finding's filed severity is below the review's verification floor. */
+export const belowVerifyFloor = (severity: Severity, floor: Severity | undefined) => SEV_RANK[severity] > SEV_RANK[floor ?? DEFAULT_VERIFY_MIN];
 export const CONF_RANK: Record<Confidence, number> = { high: 0, medium: 1, low: 2 };
 export const EFFORT_RANK: Record<Effort, number> = { S: 0, M: 1, L: 2, XL: 3 };
 

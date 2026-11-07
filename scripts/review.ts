@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { writeBriefs } from "./lib/briefs.ts";
 import { independenceWarning, loadConfig, saveResolved } from "./lib/config.ts";
 import { collectEvidence } from "./lib/evidence.ts";
+import { digest } from "./lib/digest.ts";
 import { baselineDiff, loadFindings, writeExports } from "./lib/exports.ts";
 import { validateShard, validateVote, listJson } from "./lib/findings.ts";
 import { guardBash, guardEdit, validateOnWrite, type Decision, type HookPayload } from "./lib/guard.ts";
@@ -24,7 +25,7 @@ import { mergeTopology } from "./lib/topology.ts";
 import { runDriver } from "./lib/run.ts";
 import { watchRun } from "./lib/progress.ts";
 import { validateArchitecture, validateTopology } from "./lib/architecture.ts";
-import { DIMENSIONS, SHARDED, type Dimension, type Scope, type ShardedStage } from "./lib/types.ts";
+import { DEFAULT_MAX_AGENTS, DEFAULT_MAX_FINDINGS, DEFAULT_VERIFY_MIN, DIMENSIONS, SEVERITIES, SHARDED, type Dimension, type Scope, type Severity, type ShardedStage } from "./lib/types.ts";
 import { nowIso, parseArgs, readJson, str, writeJson, writeText } from "./lib/util.ts";
 
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -51,11 +52,13 @@ export function initReview(name: string, flags: Record<string, string | true>, c
   const bad = dims.filter((d) => !(DIMENSIONS as readonly string[]).includes(d));
   if (bad.length) throw new Error(`unknown dimension(s): ${bad.join(", ")} (valid: ${DIMENSIONS.join(", ")})`);
   const effort = str(flags.effort) ?? prev?.security_effort ?? "medium";
+  const verifyMin = str(flags["verify-min"]) ?? prev?.verify_min_severity ?? DEFAULT_VERIFY_MIN;
+  if (!(SEVERITIES as readonly string[]).includes(verifyMin)) throw new Error(`--verify-min must be one of ${SEVERITIES.join("|")}`);
   if (!["low", "medium", "high"].includes(effort)) throw new Error("--effort must be low|medium|high");
   const scope: Scope = {
     name, source, analysis_dir: analysis, dimensions: dims as Dimension[],
     module: str(flags.module) ?? prev?.module,
-    max_agents: Number(str(flags["max-agents"]) ?? prev?.max_agents ?? 24),
+    max_agents: Number(str(flags["max-agents"]) ?? prev?.max_agents ?? DEFAULT_MAX_AGENTS),
     security_effort: effort as Scope["security_effort"],
     exclude: list(flags.exclude).length ? list(flags.exclude) : prev?.exclude ?? [],
     off_limits: list(flags["off-limits"]).length ? list(flags["off-limits"]) : prev?.off_limits ?? [],
@@ -63,10 +66,13 @@ export function initReview(name: string, flags: Record<string, string | true>, c
     max_usd: str(flags["max-usd"]) ? Number(flags["max-usd"]) : prev?.max_usd,
     baseline: str(flags.baseline) ?? prev?.baseline,
     // A review started before unit sizes were raised keeps the old packing (its shard keys are on disk).
+    verify_min_severity: verifyMin as Severity,
+    max_findings_per_shard: Number(str(flags["max-findings"]) ?? prev?.max_findings_per_shard ?? DEFAULT_MAX_FINDINGS),
     unit_loc: prev ? prev.unit_loc ?? LEGACY_UNIT_LOC : [MIN_UNIT_LOC, MAX_UNIT_LOC],
     created_at: prev?.created_at ?? nowIso(),
   };
   if (!Number.isInteger(scope.max_agents) || scope.max_agents < 1) throw new Error("--max-agents must be a positive integer");
+  if (!Number.isInteger(scope.max_findings_per_shard) || scope.max_findings_per_shard! < 1) throw new Error("--max-findings must be a positive integer");
   const mc = loadConfig(source, str(flags.config), cwd);
   ensureReviewRoot(source);
   writeJson(join(analysis, "scope.json"), scope);
@@ -88,7 +94,7 @@ export function initReview(name: string, flags: Record<string, string | true>, c
 }
 
 function countVerdicts(fs: { verdict?: string }[]): { by_verdict: Record<string, number> } {
-  const by_verdict: Record<string, number> = { confirmed: 0, refuted: 0, "needs-human": 0, deferred: 0, pending: 0 };
+  const by_verdict: Record<string, number> = { confirmed: 0, refuted: 0, "needs-human": 0, deferred: 0, unverified: 0, pending: 0 };
   for (const f of fs) by_verdict[f.verdict ?? "pending"]! += 1;
   return { by_verdict };
 }
@@ -110,8 +116,8 @@ export const COMMANDS: Record<string, Cmd> = {
   },
   locate: { usage: "locate <name>", run: (pos) => { console.log(scopeOrDie(pos[0]).analysis); return 0; } },
   begin: {
-    usage: "begin <name>   (re-activate the guard for a manual stage; prints the analysis dir)",
-    run: (pos) => { const { analysis, scope } = scopeOrDie(pos[0]); activate(scope.source, scope.name, analysis); console.log(analysis); return 0; },
+    usage: "begin <name>   (re-activate the guard for a manual stage; prints the analysis dir, then the source root)",
+    run: (pos) => { const { analysis, scope } = scopeOrDie(pos[0]); activate(scope.source, scope.name, analysis); console.log(analysis); console.log(`source (read-only): ${scope.source}`); return 0; },
   },
   end: { usage: "end <name>   (deactivate the guard)", run: (pos) => { const { scope } = scopeOrDie(pos[0]); deactivate(scope.source); console.log("review guard deactivated"); return 0; } },
   evidence: {
@@ -140,6 +146,16 @@ export const COMMANDS: Record<string, Cmd> = {
       return 0;
     },
   },
+  digest: {
+    usage: "digest <name> [--limit N]   (compact view of evidence, topology, findings and coverage for the prose stages; never Read the JSON whole)",
+    run: (pos, flags) => {
+      const { analysis } = scopeOrDie(pos[0]);
+      const limit = str(flags.limit) ? Number(flags.limit) : undefined;
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error("--limit must be a positive integer");
+      console.log(digest(analysis, { limit }));
+      return 0;
+    },
+  },
   "suggest-modules": {
     usage: "suggest-modules <name>   (deterministic module candidates from evidence, oversized dirs split, packed into map units: one analyst each)",
     run: (pos) => { const { analysis } = scopeOrDie(pos[0]); console.log(JSON.stringify(suggestMapUnits(analysis), null, 2)); return 0; },
@@ -158,7 +174,7 @@ export const COMMANDS: Record<string, Cmd> = {
     },
   },
   plan: {
-    usage: "plan <name> <deep|security|consolidate|verify> [--max-agents N] [--continue-deferred] [--json]",
+    usage: "plan <name> <map|deep|security|consolidate|verify> [--max-agents N] [--continue-deferred] [--json]",
     run: (pos, flags) => {
       const { analysis, scope } = scopeOrDie(pos[0]);
       const stage = pos[1] as ShardedStage;
@@ -275,7 +291,7 @@ export const COMMANDS: Record<string, Cmd> = {
       const s = writeStatus(scopeOrDie(pos[0]).analysis);
       if (flags.json === true) { console.log(JSON.stringify(s, null, 2)); return 0; }
       const v = s.findings.by_verdict;
-      console.log(`stage: ${s.next_stage ?? "complete"} · findings ${s.findings.total} (confirmed ${v.confirmed} · needs-human ${v["needs-human"]} · refuted ${v.refuted} · deferred ${v.deferred} · pending ${v.pending})`);
+      console.log(`stage: ${s.next_stage ?? "complete"} · findings ${s.findings.total} (confirmed ${v.confirmed} · needs-human ${v["needs-human"]} · refuted ${v.refuted} · deferred ${v.deferred} · unverified ${v.unverified} · pending ${v.pending})`);
       for (const st of s.stages) console.log(`  ${st.status === "pending" ? "·" : "✓"} ${st.stage}${st.status === "skipped" ? " (skipped)" : ""}`);
       const sc = Object.entries(s.findings.by_security_category);
       if (sc.length) console.log(`security candidates by category: ${sc.sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(" · ")}`);

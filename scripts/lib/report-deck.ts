@@ -199,7 +199,7 @@ export function buildDeck(c: Ctx): Deck {
     size: ev ? `${v(ev.total_files)} files · ${v(ev.total_code_lines)} code lines · ${Object.keys(ev.languages ?? {}).slice(0, 3).join(", ") || "—"}` : undefined,
   }), [isStale(c) ? "STALE: the code changed after the scan — findings may point at moved or fixed code." : "",
     verificationIncomplete(c) ? `VERIFICATION INCOMPLETE: ${k.pending} finding(s) without a verdict are excluded from every count.` : ""].filter(Boolean).join("  ")
-    || `Also: ${k.accepted} accepted risk · ${k.refuted} refuted · ${k.deferred} deferred (coverage gap).`));
+    || `Also: ${k.accepted} accepted risk · ${k.refuted} refuted · ${k.deferred} deferred (coverage gap) · ${k.unverified} unverified (below the verification floor).`));
   S.push(canvas("Where the findings are", D.heatmap(dims, c.confirmed, unc), "Confirmed findings by dimension and severity; darker cells hold more findings. \"partial\" marks a dimension that was not fully covered."));
   if (now.length) S.push(...tableSlides("Top risks — act now", ["ID", "Severity", "Title", "Location", "Effort"], now.map((f) => [idCell(f.id), sevCell(f.severity), f.title, mono(loc(f)), f.effort]), [1.3, 0.9, 5, 3, 0.7]));
   if (c.notes?.trim()) S.push(...bulletSlides("Analyst notes", mdToParas(c.notes), 13));
@@ -222,6 +222,7 @@ export function buildDeck(c: Ctx): Deck {
     const gaps: Para[] = [];
     for (const s of cov.lost_shards ?? []) gaps.push(b(`Lost shard: ${s}`));
     for (const s of cov.deferred_shards ?? []) gaps.push(b(`Deferred shard (agent cap): ${s}`));
+    for (const s of cov.capped_shards ?? []) gaps.push(b(`Findings cap: ${s.shard} filed ${s.filed}, the ${s.kept} most severe were kept`));
     for (const s of cov.scanners?.failed ?? []) gaps.push(b(`Scanner ${v(s.id)} ${v(s.status)}: ${trunc(v(s.error), 300)}`));
     for (const s of cov.scanners?.missing ?? []) gaps.push(b(`Scanner ${s} not installed`));
     for (const s of cov.not_reached ?? []) gaps.push(b(`Not reached: ${s}`));
@@ -332,6 +333,8 @@ export function buildDeck(c: Ctx): Deck {
     c.refuted.map((f) => [idCell(f.id), f.title, mono(loc(f)), f.verifier_note ?? (f.votes ?? []).map((x) => `${x.lens}: ${x.note}`).join("; ")]), [1.3, 3, 2.2, 4.5]));
   S.push(...tableSlides("Deferred (coverage gap — not verified)", ["ID", "Severity", "Title", "Location"],
     c.deferred.map((f) => [idCell(f.id), sevCell(f.severity), f.title, mono(loc(f))]), [1.3, 1, 5, 3]));
+  S.push(...tableSlides("Unverified (below the verification floor)", ["ID", "Severity", "Title", "Location"],
+    c.unverified.map((f) => [idCell(f.id), sevCell(f.severity), f.title, mono(loc(f))]), [1.3, 1, 5, 3]));
 
   // Agenda (section positions +1 for the agenda slide itself), then a section kicker on every content slide.
   const items = S.map((s, i) => [s, i] as const).filter(([s]) => s.kind === "section").map(([s, i]) => ({ title: s.title, slide: i + 2 }));

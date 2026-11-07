@@ -22,10 +22,11 @@ test("roles: main drives finders (and writer model unless set), evaluator drives
   assert.deepEqual(agentChoice(c, "quality-reviewer"), { model: "opus", effort: "medium" });
   assert.deepEqual(agentChoice(c, "security-auditor"), { model: "opus", effort: "xhigh" });
   assert.deepEqual(agentChoice(c, "finding-verifier"), { model: "fable" });
-  assert.deepEqual(stageChoice(c, "map"), { model: "opus", effort: "medium" }, "writer follows main.model, keeps its own effort");
+  assert.deepEqual(stageChoice(c, "preflight"), { model: "opus", effort: "medium" }, "writer follows main.model, keeps its own effort");
   assert.deepEqual(stageChoice(c, "report"), { model: "opus", effort: "high" });
   assert.deepEqual(stageChoice(c, "deep"), { model: "sonnet", effort: "low" }, "orchestrator is its own role");
-  assert.deepEqual(stageChoice({ main: { model: "opus" }, writer: { model: "haiku" } }, "map"), { model: "haiku", effort: "medium" });
+  assert.deepEqual(stageChoice(c, "map"), { model: "sonnet", effort: "low" }, "map only dispatches its planned analysts");
+  assert.deepEqual(stageChoice({ main: { model: "opus" }, writer: { model: "haiku" } }, "assess"), { model: "haiku", effort: "medium" });
   assert.match(independenceWarning({ main: { model: "opus" }, evaluator: { model: "opus" } })!, /different model tier/);
 });
 
