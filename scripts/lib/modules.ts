@@ -55,8 +55,12 @@ export function suggestMapUnits(analysis: string): { modules: ReturnType<typeof 
 // overhead on a 19-line file. Modules are packed in path order (siblings stay
 // together) until a unit reaches MIN_UNIT_LOC, never past MAX_UNIT_LOC; a module
 // at or above MIN_UNIT_LOC, or of unknown size, is always its own unit.
-export const MIN_UNIT_LOC = 1500;
-export const MAX_UNIT_LOC = 4000;
+// Every agent re-pays a fixed start-up cost (system prompt, tools, brief, threat map),
+// so agent count, not lines read, dominates a large repository's bill.
+export const MIN_UNIT_LOC = 3000;
+export const MAX_UNIT_LOC = 8000;
+/** Packing of reviews started before 2.2.0: kept so a resume finds its shards under the same keys. */
+export const LEGACY_UNIT_LOC: [number, number] = [1500, 4000];
 
 export interface ReviewUnit { name: string; paths: string[]; modules: string[]; lines: number }
 

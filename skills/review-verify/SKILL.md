@@ -10,5 +10,5 @@ allowed-tools: Read, Workflow(code-review-harness:review-tasks), Agent, Bash(nod
 1. `R begin $ARGUMENTS`. If `plan/verify.workflow-args.json` is missing (manual run), run `R plan $ARGUMENTS verify --continue-deferred` (it merges first, then plans one vote task per lens; a security panel is never split across the cap; over-cap findings stay `deferred` until the next invocation of this command runs them).
 2. Pass `plan/verify.workflow-args.json` unchanged as `args` to `code-review-harness:review-tasks`. Fallback: one Agent per task.
 3. Verifiers write `votes/<id>--<lens>.json` themselves. You never set verdicts: `R merge $ARGUMENTS --after verify --final` computes them (incomplete panels become needs-human).
-4. `R validate $ARGUMENTS --require-verdict` must pass. Report counts per verdict and list every needs-human finding as an explicit question.
+4. `R validate $ARGUMENTS --require-verdict` must pass. Then `R status $ARGUMENTS`: report counts per verdict and turn every finding in its needs-human list into an explicit question (do not open findings.json or vote files to build it).
 5. If `R status $ARGUMENTS` still lists deferred `verify:` tasks, run this command again first (each invocation runs one batch). Next: `/code-review-harness:review-architecture $ARGUMENTS`.

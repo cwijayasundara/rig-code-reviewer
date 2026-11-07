@@ -63,7 +63,15 @@ export function buildStatus(analysis: string) {
   const by_verdict: Record<string, number> = { confirmed: 0, refuted: 0, "needs-human": 0, deferred: 0, pending: 0 };
   const by_severity: Record<string, number> = {};
   const by_dimension: Record<string, number> = {};
+  // Security candidates per category and CWE: the security stage reports these, so the
+  // CLI provides them rather than leaving the stage to tally shard files itself.
+  const by_security_category: Record<string, number> = {};
+  const by_cwe: Record<string, number> = {};
   for (const f of findings) {
+    if (f.dimension === "security") {
+      by_security_category[f.category ?? "uncategorised"] = (by_security_category[f.category ?? "uncategorised"] ?? 0) + 1;
+      if (f.cwe) by_cwe[f.cwe] = (by_cwe[f.cwe] ?? 0) + 1;
+    }
     by_verdict[f.verdict ?? "pending"]! += 1;
     if (f.verdict === "confirmed" && !f.accepted) by_severity[f.severity] = (by_severity[f.severity] ?? 0) + 1;
     by_dimension[f.dimension] = (by_dimension[f.dimension] ?? 0) + 1;
@@ -78,7 +86,9 @@ export function buildStatus(analysis: string) {
   return {
     name, analysis_dir: analysis, source: scope?.source ?? null,
     stages, next_stage: next?.stage ?? null, next_command: next?.command ?? null, complete: !next,
-    findings: { total: findings.length, by_verdict, by_severity, by_dimension, accepted: findings.filter((f) => f.accepted).length },
+    findings: { total: findings.length, by_verdict, by_severity, by_dimension, by_security_category, by_cwe, accepted: findings.filter((f) => f.accepted).length,
+      // The verify stage lists these as questions for a human; no stage has to read findings.json for them.
+      needs_human: findings.filter((f) => f.verdict === "needs-human" && !f.accepted).map((f) => ({ id: f.id, file: f.file, line: f.line, severity: f.severity, title: f.title })) },
     shards: {
       expected, completed, lost, deferred,
       plans: Object.fromEntries(Object.entries(plans).map(([k, p]) => [k, p && { planned: p.planned, lost: p.lost.length, deferred: p.deferred.length, ...(p.deferred_accepted ? { deferred_accepted: true } : {}), skipped: p.skipped, estimate: p.estimate }])),

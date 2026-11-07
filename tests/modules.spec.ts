@@ -31,15 +31,15 @@ test("packUnits: modules at or above the floor, or of unknown size, are never pa
 
 test("packUnits: units close at the floor, never exceed the ceiling, and a small tail joins its neighbour", () => {
   const m = (n: number, lines: number) => ({ name: `m${n}`, path: `src/m${n}`, lines });
-  const u = packUnits([m(1, 800), m(2, 800), m(3, 800), m(4, 800), m(5, 200)]);
+  const u = packUnits([m(1, 1600), m(2, 1600), m(3, 1600), m(4, 1600), m(5, 400)]);
   assert.deepEqual(u.map((x) => x.modules), [["m1", "m2"], ["m3", "m4", "m5"]]);
-  const capped = packUnits([m(1, 1400), m(2, 1400), m(3, 1400)], undefined, { min: 5000, max: MAX_UNIT_LOC });
+  const capped = packUnits([m(1, 2800), m(2, 2800), m(3, 2800)], undefined, { min: 10000, max: MAX_UNIT_LOC });
   assert.ok(capped.every((x) => x.lines <= MAX_UNIT_LOC), JSON.stringify(capped));
   assert.deepEqual(capped.map((x) => x.modules.length), [2, 1]);
 });
 
 test("packUnits: evidence SLOC outranks the map's own line counts", () => {
-  const u = packUnits([{ name: "a", path: "src/a", lines: 10 }, { name: "b", path: "src/b", lines: 10 }], { "src/a/x.py": 3000, "src/b/y.py": 20 });
+  const u = packUnits([{ name: "a", path: "src/a", lines: 10 }, { name: "b", path: "src/b", lines: 10 }], { "src/a/x.py": MIN_UNIT_LOC, "src/b/y.py": 20 });
   assert.deepEqual(u.map((x) => x.modules), [["a"], ["b"]]);
 });
 

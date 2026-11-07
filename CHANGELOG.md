@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+**Fixed — agents scripting around missing context, and stages scripting around missing CLI output**
+- Unit briefs pointed agents only at the repo-wide `evidence.json` / `topology.json`, which grow with the repository and can be too large to Read. Agents then sliced them and listed their own files with interpreters and shell loops, which the headless allowlist denies: every denial was a wasted turn at full context. Each unit brief now inlines that unit's files (largest first, up to 150, the rest left to Glob), hotspots, complexity, entry points, edges, data stores and externals. Every brief and every agent now states which Bash forms are denied (interpreters, loops, `cd`, chained or piped commands) and to use Glob/Grep/Read instead.
+- `review-security` asked its orchestrator to report candidates by CWE category, and `review-verify` to list every needs-human finding, but no command printed either, so the stage had to tally files itself. `status` now carries `findings.by_security_category`, `findings.by_cwe` and `findings.needs_human` (also printed in text mode), and the skills point at it.
+- A Claude usage or rate limit mid-stage used to surface as lost shards, a retry, and "cause not identified". The driver now recognises the limit in the CLI's own output (never in repository content), keeps finished shards, does not retry, and says to resume after the limit resets.
+
+**Changed — fewer, better-aimed agents in deep and security**
+- Review units are packed to 3,000–8,000 SLOC (was 1,500–4,000): each agent re-pays a fixed start-up cost, so agent count drives the bill. The sizes are frozen in `scope.json` (`unit_loc`) at first init; existing reviews keep 1,500/4,000 so a resume finds its shards.
+- Units are classified from the evidence file list. Infra-only units (config languages, Terraform/HCL, non-source files) get no code-local deep reviewer (operability and security cover them) and one security auditor for config-and-exposure + crypto-and-secrets (`<unit>--infra`; a unit already audited for all categories counts as done). Test-only units get no per-unit security auditor; the secrets sweep runs to cover them, at every effort level. Plan formulas name what was left to whom.
+- `security-auditor` effort `xhigh` → `high` (the three-lens verify panel still judges every candidate). `agents.security-auditor.effort` in config.json restores it.
+
 **Changed — the deep stage judges system-level dimensions once, not per module**
 - Deep review used to start one specialist per review unit × dimension: a 20-unit repo with all seven non-security dimensions started 140 agents and wrote 140 briefs and 140 shards, and architecture was judged unit by unit through a keyhole (then again over the whole system by `review-architecture`).
 - Following the code-modernization plugin's design (whole-system assessment and topology; per-module shards only for code-local work): architecture, dependencies, operability and data now get one agent each over the whole system (`raw/deep/<dim>--system.json`), and every review unit gets one `module-reviewer` for quality, performance and testing (one specialist when only one of those is in scope). The same 20-unit repo now starts 24 agents.

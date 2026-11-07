@@ -108,6 +108,8 @@ export interface Scope {
   no_execution: boolean;
   max_usd?: number;
   baseline?: string;
+  /** Review-unit packing [min, max] SLOC, frozen at first init so a resume never re-keys finished shards. */
+  unit_loc?: [number, number];
   created_at: string;
 }
 

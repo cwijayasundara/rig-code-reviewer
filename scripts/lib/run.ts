@@ -112,6 +112,27 @@ export class CeilingTracker {
 }
 
 /**
+ * True once a stage's own output says the account hit a Claude usage or rate limit
+ * (e.g. "usage limit reached", "hit your limit … resets <time>"). Agents still running
+ * then die without writing their shards, so the loss is neither flaky agents nor a cause a
+ * retry could fix: the driver stops with the reset time instead of retrying. Like
+ * CeilingTracker, only stderr and system/result events count.
+ */
+export class LimitTracker {
+  hit = false;
+  detail = "";
+  see(line: string): void {
+    if (this.hit) return;
+    let ev: any;
+    try { ev = JSON.parse(line); } catch { ev = undefined; }
+    if (ev !== undefined && ev?.type !== "system" && ev?.type !== "result") return;
+    const text = ev === undefined ? line : typeof ev.result === "string" ? ev.result : JSON.stringify(ev);
+    const m = /usage limit reached[^"\n]{0,60}|hit your (?:usage )?limit[^"\n]{0,60}|rate[ _-]?limit(?:ed)?\b[^"\n]{0,60}|\blimit\b[^"\n]{0,40}\bresets?\b[^"\n]{0,30}/i.exec(text);
+    if (m) { this.hit = true; this.detail = m[0].trim(); }
+  }
+}
+
+/**
  * A batch that lost most of its shards failed for one shared reason (a wait ceiling,
  * a budget stop, an outage), not because a few agents were flaky; retrying it repeats
  * the failure and spends the budget. A single lost shard always gets its retry.
@@ -243,6 +264,8 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
   const denials = new Map<Stage, DenialTracker>();
   const hint = (stage: Stage) => denialHint(stage, denials.get(stage)?.denied ?? []);
   let ceiling = new CeilingTracker(); // reset per spawn: did *this* process hit the wait ceiling?
+  let limit = new LimitTracker(); // reset per spawn: did *this* process hit a usage limit?
+  const limitStop = (stage: Stage) => `${stage} stopped: Claude usage limit reached (${limit.detail}). Agents running at that moment ended without writing their shards; this is not a harness fault and was not retried. Finished shards are kept. After the limit resets, resume: /code-review-harness:review-run ${name} --source ${source}`;
   const spawnStage = async (stage: Stage, agents?: number, completed?: () => number): Promise<number> => {
     const prompt = `/code-review-harness:review-${stage} ${name}`;
     const args = ["-p", prompt];
@@ -263,10 +286,11 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
     const tracker = denials.get(stage) ?? new DenialTracker();
     denials.set(stage, tracker);
     const seen = (ceiling = new CeilingTracker());
+    const lim = (limit = new LimitTracker());
     const lines = createInterface({ input: child.stdout });
-    lines.on("line", (l) => { const r = onStreamLine(l, log); if (r) data = r; tracker.see(l); seen.see(l); });
+    lines.on("line", (l) => { const r = onStreamLine(l, log); if (r) data = r; tracker.see(l); seen.see(l); lim.see(l); });
     child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (c: string) => { process.stderr.write(c); for (const l of c.split("\n")) if (l.trim()) { log.warn(`    ! ${l}`); seen.see(l); } });
+    child.stderr.on("data", (c: string) => { process.stderr.write(c); for (const l of c.split("\n")) if (l.trim()) { log.warn(`    ! ${l}`); seen.see(l); lim.see(l); } });
     const rc = await new Promise<number>((res) => {
       child.on("error", (e) => { warn(`error: could not start ${bin}: ${e.message}`); res(127); });
       child.on("close", (code) => res(code ?? 1));
@@ -322,6 +346,13 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
       writeArgs(analysis, scope.source, plan);
       const before = attemptsOf(analysis, stage);
       let rc = await spawnStage(stage, plan.run.length, produced);
+      if (limit.hit) {
+        if (attemptsOf(analysis, stage) === before) markAttempt(analysis, stage);
+        runMerge(analysis, stage === "verify" ? { final: true } : {});
+        writeStatus(analysis);
+        warn(`error: ${limitStop(stage)}`);
+        return 1;
+      }
       if (rc === 0) {
         if (attemptsOf(analysis, stage) === before) markAttempt(analysis, stage); // unless the skill's `merge --after` did
         const st = buildStatus(analysis).shards.plans[stage];
@@ -347,6 +378,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
         }
       }
       runMerge(analysis, stage === "verify" ? { final: true } : {}); // THREAT_MODEL.md, coverage, findings
+      if (limit.hit) { writeStatus(analysis); warn(`error: ${limitStop(stage)}`); return 1; } // hit during the retry
       if (rc !== 0) return rc;
       if (allowDeferred || !plan.deferred.length) return 0;
       if (plan.deferred.length >= lastDeferred) { warn(`error: ${stage} batch ${batch} made no progress on ${plan.deferred.length} deferred task(s)`); return 1; }
@@ -373,6 +405,7 @@ async function driveRun(name: string, flags: Record<string, string | true>, plug
         rc = r;
       } else {
         rc = await spawnStage(stage);
+        if (limit.hit) { writeStatus(analysis); warn(`error: ${limitStop(stage)}`); return 1; }
       }
       const status = writeStatus(analysis);
       if (dry) continue;

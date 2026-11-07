@@ -11,7 +11,7 @@ import { toSarif } from "../scripts/lib/exports.ts";
 import type { Finding } from "../scripts/lib/types.ts";
 import { APP, ROOT, cli, put, tree } from "./testkit.ts";
 
-function review(dims = "quality,performance,security", modules = 3, lines = 2000) {
+function review(dims = "quality,performance,security", modules = 3, lines = 4000) {
   const src = tree({ "src/app.py": APP });
   assert.equal(cli(["init", "p", "--source", src, "--dimensions", dims]).code, 0);
   const a = join(src, ".code-review", "p");
@@ -242,7 +242,7 @@ test("a sharded stage with deferred work is not done; only an explicit --allow-d
   const { markAttempt } = await import("../scripts/lib/plan.ts");
   const { src, a } = review("quality,performance", 3);
   put(a, "PREFLIGHT.md", "x"); put(a, "ASSESSMENT.md", "x"); put(a, "evidence.json", { files: [] }); stampRevision(a, src);
-  put(a, "topology.json", { modules: [0, 1, 2].map((i) => ({ name: `m${i}`, path: `src/m${i}`, lines: 2000 })), edges: [], entry_points: [], data_stores: [], externals: [], flows: [], observations: [] });
+  put(a, "topology.json", { modules: [0, 1, 2].map((i) => ({ name: `m${i}`, path: `src/m${i}`, lines: 4000 })), edges: [], entry_points: [], data_stores: [], externals: [], flows: [], observations: [] });
   const p = buildPlan(a, "deep", { maxAgents: 2 });
   for (const t of p.run) put(a, t.out, { shard: t.key, filesRead: [], notReached: [], findings: [] });
   markAttempt(a, "deep");

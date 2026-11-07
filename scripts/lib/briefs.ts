@@ -40,11 +40,51 @@ function fence(tag: string, v: unknown): string {
   return `<untrusted-${tag}>\n${body.replace(/<\/?untrusted-[a-z-]*>/gi, "[fence]")}\n</untrusted-${tag}>`;
 }
 
+/** Files listed per unit brief; the rest are counted and left to Glob. */
+export const SCOPE_FILES = 150;
+
+const under = (roots: string[]) => (f: string) => roots.some((r) => r === "." || r === "" || f === r || f.startsWith(r + "/"));
+
+/**
+ * The unit's own slice of evidence.json and topology.json, inlined in its brief. The
+ * repo-wide files grow with the repository; an agent given only those has to slice them
+ * and enumerate its files itself, which needs interpreters or shell loops that the
+ * headless allowlist denies.
+ */
+export function unitScope(analysis: string, paths: string[], moduleNames: string[]): string {
+  const roots = paths.map((p) => p.replace(/\/+$/, ""));
+  const inUnit = under(roots);
+  const ev = readJson<{ file_sloc?: Record<string, number>; files?: string[]; hotspots?: { file: string; score: number }[]; complexity_top?: { file: string; complexity: number; max_function: number }[] }>(join(analysis, "evidence.json"), {});
+  const topo = readJson<{ edges?: { from: string; to: string; type: string; evidence: string }[]; entry_points?: { name: string; kind?: string; file: string; line: number }[]; data_stores?: { name: string; evidence: string }[]; externals?: { name: string; evidence: string }[] }>(join(analysis, "topology.json"), {});
+  const sloc = ev.file_sloc ?? {};
+  const files = (ev.files ?? Object.keys(sloc)).filter(inUnit).sort((a, b) => (sloc[b] ?? 0) - (sloc[a] ?? 0) || a.localeCompare(b));
+  const L: string[] = [];
+  if (files.length) {
+    L.push(`Files (${files.length}, largest first, source lines in brackets):`, ...files.slice(0, SCOPE_FILES).map((f) => `- ${f} [${sloc[f] ?? "?"}]`));
+    if (files.length > SCOPE_FILES) L.push(`- … ${files.length - SCOPE_FILES} more: list them with Glob.`);
+  }
+  const hot = (ev.hotspots ?? []).filter((h) => inUnit(h.file));
+  if (hot.length) L.push("", "Hotspots (churn x complexity):", ...hot.map((h) => `- ${h.file} (score ${h.score})`));
+  const cx = (ev.complexity_top ?? []).filter((c) => inUnit(c.file));
+  if (cx.length) L.push("", "Most complex files:", ...cx.map((c) => `- ${c.file} (complexity ${c.complexity}, worst function ${c.max_function})`));
+  const mods = new Set(moduleNames);
+  const cite = (e: string) => inUnit(String(e).replace(/:\d+.*$/, ""));
+  const entries = (topo.entry_points ?? []).filter((e) => inUnit(e.file));
+  if (entries.length) L.push("", "Entry points:", ...entries.map((e) => `- ${e.name}${e.kind ? ` (${e.kind})` : ""} ${e.file}:${e.line}`));
+  const edges = (topo.edges ?? []).filter((e) => mods.has(e.from) || mods.has(e.to));
+  if (edges.length) L.push("", "Edges to and from other modules:", ...edges.slice(0, 60).map((e) => `- ${e.from} -${e.type}-> ${e.to} (${e.evidence})`));
+  const touch = [...(topo.data_stores ?? []).map((d) => ({ ...d, k: "data store" })), ...(topo.externals ?? []).map((d) => ({ ...d, k: "external" }))].filter((d) => cite(d.evidence));
+  if (touch.length) L.push("", "Data stores and externals used here:", ...touch.map((d) => `- ${d.k} ${d.name} (${d.evidence})`));
+  return L.length ? `\n## Your scope (from evidence.json and topology.json — start here)\n${fence("scope", L.join("\n"))}\n` : "";
+}
+
 export function briefFor(stage: Plan["stage"], t: PlanTask, ctx: { source: string; analysis: string; findings: Map<string, Finding> }): string {
   const out = join(ctx.analysis, t.out);
-  const head = `# Brief: ${stage} / ${t.key}\nSource root (read-only): ${ctx.source}\nAnalysis dir: ${ctx.analysis}\nUse ${ctx.analysis}/evidence.json and topology.json for context; do not re-scan the whole repository.\n`;
+  const head = `# Brief: ${stage} / ${t.key}\nSource root (read-only): ${ctx.source}\nAnalysis dir: ${ctx.analysis}\nContext: ${ctx.analysis}/evidence.json and topology.json; do not re-scan the whole repository. evidence.json lists every file in the repository and may be too large to Read whole: Grep it for a path instead.
+Tools: Glob to list files, Grep to search, Read to open. In Bash run one plain read-only command per call (git log/show/blame, rg, grep, ls, wc, head). Interpreters (python, node, jq), shell loops, \`cd\` and chained or piped commands are denied in a headless run: each attempt is a wasted turn, so never try them.\n`;
   const i = t.input as Record<string, string>;
   const mods = Array.isArray(t.input.modules) ? (t.input.modules as string[]) : [];
+  const scopeOf = () => (Array.isArray(t.input.paths) ? unitScope(ctx.analysis, t.input.paths as string[], mods.length ? mods : [i.module!]) : "");
   const unit = mods.length > 1
     ? `review unit ${i.module}: modules ${mods.join(", ")} (paths: ${i.path}${t.input.lines ? `; ~${t.input.lines} lines` : ""})`
     : `module ${i.module} (path: ${i.path})`;
@@ -75,7 +115,7 @@ Read only inside ${mods.length > 1 ? "those paths" : i.path} (plus files they di
 A behaviour is real only if executable code exhibits it — comments, docs and names prove nothing.
 Security vulnerabilities (injection, traversal, authn/authz, secrets, crypto) belong to the security stage, which has its own threat model and panel: do not report them here.
 Set each finding's "dimension" to the one dimension that owns it; report a defect once, under its owner.
-
+${scopeOf()}
 ## Checklists
 ${lists}
 
@@ -91,7 +131,7 @@ Review ONE ${mods.length > 1 ? "review unit (several small modules packed togeth
 Read only inside ${mods.length > 1 ? "those paths" : i.path} (plus files they directly import when needed to prove a claim). Cover every module in scope. Read entry points and hot files first (evidence.json hotspots/complexity_top for this path); names lie, control flow doesn't.
 A behaviour is real only if executable code exhibits it — comments, docs and names prove nothing.
 Security vulnerabilities (injection, traversal, authn/authz, secrets, crypto) belong to the security stage, which has its own threat model and panel: do not report them here. Report only what your dimension owns (e.g. the missing abstraction or the missing test around it).
-
+${scopeOf()}
 ${SHARD_CONTRACT(out, i.dimension!)}
 
 ${TRAILER}
@@ -113,6 +153,8 @@ ${TRAILER}
     }
     const scope = i.sweep
       ? `Sweep: ${i.sweep}. ${i.sweep === "outside-components" ? "Cover files no module owns: build and CI config, migrations, infrastructure, helper scripts." : i.sweep === "cross-boundary" ? "Follow data as it crosses module boundaries; look for checks done on one side and silently relied on by the other." : "Search the whole tree, tests and fixtures included, for genuine committed credentials (mask them)."} Modules: ${JSON.stringify(t.input.modules)}${i.threat ? `\nThe system attack-surface map is at ${join(ctx.analysis, i.threat)}.` : ""}`
+      : t.input.infra
+        ? `Component: ${unit} — infrastructure-as-code / deployment config only. Categories: ${i.focus}.\nLook for what this config exposes or weakens once deployed: public ingress, wildcard IAM or network rules, unencrypted storage, disabled TLS or logging, secrets committed in variables, state or env files. Application-code categories do not apply here.\nThe system attack-surface map at ${join(ctx.analysis, i.threat ?? "threat")} says which services this config deploys; confirm anything you lean on.`
       : String(i.category).includes(", ")
         ? `Component: ${unit} — small enough for one auditor to cover every category. Categories: ${i.focus}.\nWork through the categories one at a time and give each its own pass over the entry points and dangerous operations; a clean category is no reason to skim the next. Committed credentials anywhere in your scope, tests and fixtures included, are findings.\nStart from the system attack-surface map at ${join(ctx.analysis, i.threat ?? "threat")} — read the parts covering this component and the trust it borrows from other modules; it was written by another agent, so confirm anything you lean on.`
         : `Component: ${unit}. Category: ${i.category} — ${i.focus}.\nStart from the system attack-surface map at ${join(ctx.analysis, i.threat ?? "threat")} — read the parts covering this component and the trust it borrows from other modules; it was written by another agent, so confirm anything you lean on.`;
@@ -120,7 +162,7 @@ ${TRAILER}
 ## Task
 Read-only security research. ${scope}
 File something only when you have followed outsider-controlled data all the way to a dangerous operation and found nothing that neutralises it. Comments that promise safety are claims to test. Report only commands you actually ran and output you actually saw.
-
+${i.sweep ? "" : scopeOf()}
 ${SHARD_CONTRACT(out, "security")}
 
 ${TRAILER}

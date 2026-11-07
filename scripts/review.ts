@@ -19,7 +19,7 @@ import { renderDeck } from "./lib/report-deck.ts";
 import { checkFresh, finaliseRevision, stampRevision } from "./lib/revision.ts";
 import { runScanners } from "./lib/scanners.ts";
 import { writeStatus } from "./lib/status.ts";
-import { suggestMapUnits } from "./lib/modules.ts";
+import { LEGACY_UNIT_LOC, MAX_UNIT_LOC, MIN_UNIT_LOC, suggestMapUnits } from "./lib/modules.ts";
 import { mergeTopology } from "./lib/topology.ts";
 import { runDriver } from "./lib/run.ts";
 import { watchRun } from "./lib/progress.ts";
@@ -62,6 +62,8 @@ export function initReview(name: string, flags: Record<string, string | true>, c
     no_execution: flags["no-execution"] === true || (prev?.no_execution ?? false),
     max_usd: str(flags["max-usd"]) ? Number(flags["max-usd"]) : prev?.max_usd,
     baseline: str(flags.baseline) ?? prev?.baseline,
+    // A review started before unit sizes were raised keeps the old packing (its shard keys are on disk).
+    unit_loc: prev ? prev.unit_loc ?? LEGACY_UNIT_LOC : [MIN_UNIT_LOC, MAX_UNIT_LOC],
     created_at: prev?.created_at ?? nowIso(),
   };
   if (!Number.isInteger(scope.max_agents) || scope.max_agents < 1) throw new Error("--max-agents must be a positive integer");
@@ -275,6 +277,12 @@ export const COMMANDS: Record<string, Cmd> = {
       const v = s.findings.by_verdict;
       console.log(`stage: ${s.next_stage ?? "complete"} · findings ${s.findings.total} (confirmed ${v.confirmed} · needs-human ${v["needs-human"]} · refuted ${v.refuted} · deferred ${v.deferred} · pending ${v.pending})`);
       for (const st of s.stages) console.log(`  ${st.status === "pending" ? "·" : "✓"} ${st.stage}${st.status === "skipped" ? " (skipped)" : ""}`);
+      const sc = Object.entries(s.findings.by_security_category);
+      if (sc.length) console.log(`security candidates by category: ${sc.sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(" · ")}`);
+      const cw = Object.entries(s.findings.by_cwe);
+      if (cw.length) console.log(`by CWE: ${cw.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 15).map(([k, n]) => `${k} ${n}`).join(" · ")}${cw.length > 15 ? ` (+${cw.length - 15} more)` : ""}`);
+      const nh = s.findings.needs_human;
+      if (nh.length) { console.log(`needs-human (${nh.length}):`); for (const f of nh.slice(0, 40)) console.log(`  ${f.id} [${f.severity}] ${f.file}:${f.line} — ${f.title}`); if (nh.length > 40) console.log(`  … ${nh.length - 40} more: status --json`); }
       if (s.shards.lost.length) console.log(`lost shards (${s.shards.lost.length}): ${s.shards.lost.slice(0, 20).join(", ")}`);
       if (s.shards.deferred.length) console.log(`deferred shards (${s.shards.deferred.length}): ${s.shards.deferred.slice(0, 20).join(", ")}`);
       if (s.shards.oversized_modules.length) console.log(`oversized modules (split in topology.json): ${s.shards.oversized_modules.join(", ")}`);

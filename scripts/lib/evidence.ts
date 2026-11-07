@@ -89,6 +89,15 @@ export function isTestFile(f: string): boolean {
   return TEST_NAME.some((re) => re.test(b));
 }
 
+/**
+ * Not application code, by the language table above: a config language, Terraform/HCL,
+ * or a file the table does not count as source at all (JSON, Dockerfiles, lock files…).
+ */
+export function isInfraFile(f: string): boolean {
+  const def = LANGS[ext(f)];
+  return !def || /\(config\)|^Terraform$/.test(def[0]);
+}
+
 /** Source lines: non-blank and not comment-only (block comments best-effort). */
 export function sloc(text: string, def: LangDef | undefined): number {
   const [, line, block] = def ?? ["", [], null];
